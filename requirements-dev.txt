@@ -1,5 +1,5 @@
 -r requirements.txt
-fakeredis==2.26.2
+fakeredis==2.38.0
 pytest==8.3.4
 pytest-cov==7.1.0
 ruff==0.16.8
