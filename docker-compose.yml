@@ -1,10 +1,36 @@
 services:
   redis:
     image: redis:7-alpine
+    command: redis-server --appendonly yes --appendfsync everysec
     ports:
       - "6379:6379"
+    volumes:
+      - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 2s
       timeout: 2s
       retries: 15
+
+  # Not verified end-to-end on Windows/Docker-Desktop in this repo's own
+  # dev loop (the docker.sock bind mount below behaves differently across
+  # platforms -- straightforward on native Linux, WSL2-backend-dependent
+  # on Windows). The pattern itself (build, healthcheck, socket passthrough
+  # for sandboxed task execution) is standard; verify it on your target
+  # host before relying on it. Local dev has been running the orchestrator
+  # directly via `uvicorn` (see README) with tasks still sandboxed via a
+  # host Docker daemon -- that path *is* verified.
+  orchestrator:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      ORCH_REDIS_URL: redis://redis:6379/0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis-data:

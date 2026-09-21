@@ -14,9 +14,10 @@ delivered twice -- acceptable for this use case, callers can dedupe by
 """
 import json
 import time
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
-import redis
+from orchestrator.redis_client import make_pubsub_redis_client
 
 LOG_MAX_ENTRIES = 200
 LOG_TTL_SECONDS = 3600
@@ -31,8 +32,8 @@ def _log_key(job_id: str) -> str:
 
 
 class MessageBus:
-    def __init__(self, redis_url: str):
-        self.client = redis.Redis.from_url(redis_url, decode_responses=True)
+    def __init__(self, redis_url: str | None = None):
+        self.client = make_pubsub_redis_client(redis_url)
 
     def publish(self, job_id: str, event_type: str, data: dict[str, Any]) -> None:
         message = {"type": event_type, "data": data, "ts": time.time()}

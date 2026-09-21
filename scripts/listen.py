@@ -5,6 +5,7 @@ happen.
 Usage:
     python scripts/listen.py <job_id>
 """
+import contextlib
 import sys
 from pathlib import Path
 
@@ -30,7 +31,5 @@ if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("usage: python scripts/listen.py <job_id>")
         sys.exit(1)
-    try:
+    with contextlib.suppress(KeyboardInterrupt):
         main(sys.argv[1])
-    except KeyboardInterrupt:
-        pass
