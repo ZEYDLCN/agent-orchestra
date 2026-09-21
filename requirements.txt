@@ -7,3 +7,5 @@ requests==2.32.3
 mcp==2.2.0
 anthropic==1.7.0
 openai==3.16.2
+prometheus-fastapi-instrumentator==8.1.0
+prometheus-client==0.26.0

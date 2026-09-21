@@ -1,0 +1,52 @@
+[project]
+name = "agent-orchestration-tool"
+version = "0.1.0"
+description = "Clustered multi-agent task orchestration: worktree-isolated, sandboxed workers coordinated over a durable Redis queue."
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+ignore = [
+    "E501",  # line length is a formatter concern, not a lint failure
+    "UP042", # str+Enum kept deliberately over StrEnum: pydantic's interaction
+             # with StrEnum's __format__ override has known edge cases; not
+             # worth relitigating without dedicated test coverage for it
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+disallow_untyped_defs = false
+warn_unused_ignores = true
+exclude = ["target_repo/", "target_repo_seed/", "sandbox/", "workspace/"]
+
+# redis-py's official stubs share method signatures between the sync and
+# async clients, so every command's return type is typed as
+# `Awaitable[T] | T` even on the plain sync `redis.Redis` we always use
+# here. That makes mypy flag real, correct code across every module that
+# talks to Redis directly. Narrowing it per-call-site would mean a `cast()`
+# on nearly every Redis call for no actual bug found; scoping the noise out
+# per-module (rather than globally) keeps the checker meaningful elsewhere.
+[[tool.mypy.overrides]]
+module = [
+    "orchestrator.queue",
+    "orchestrator.messaging",
+    "orchestrator.memory",
+    "orchestrator.worker_registry",
+    "orchestrator.metrics",
+]
+disable_error_code = ["arg-type", "union-attr", "return-value", "misc", "index"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["orchestrator", "worker"]
+omit = ["*/tests/*"]
