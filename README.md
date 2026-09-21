@@ -5,21 +5,46 @@ görev dağıttığı, Redis kuyruğu üzerinden koordine olan bir çoklu-agent
 orkestrasyon altyapısı. Demo senaryosu: bir trading stratejisinin parametre
 grid'ini worker'lara dağıtıp sonuçları karşılaştırma (clustered backtest).
 
-## Mimari (Day 1)
+## Mimari
 
 ```
 FastAPI orchestrator --push--> Redis queue --pop--> Worker process
-        |                                                |
-        +--> her worker'a ayrı git worktree (target_repo/) tahsis eder
+        |                          |                     |
+        |                    pub/sub events         LLM (multi-provider)
+        |                          |                     |
+        +--> git worktree per worker              shared memory (RAG-lite)
 ```
 
 - `orchestrator/` — FastAPI servisi: iş kabul eder, worker spawn/scale eder, sonuç toplar
-- `worker/` — worker process: kuyruktan görev çeker, kendi worktree'sinde çalıştırır
-- `target_repo/` — worker'ların worktree aldığı örnek "çalışma kod tabanı" (sample strategy.py)
+- `orchestrator/queue.py` — Redis tabanlı task kuyruğu + durum takibi
+- `orchestrator/messaging.py` — inter-agent pub/sub (worker'lar sonuçlarını yayınlar)
+- `orchestrator/memory.py` — shared memory + RAG-lite (parametre-uzayı benzerliğine göre geçmiş sonuç getirme)
+- `orchestrator/llm/` — multi-LLM soyutlaması: `mock` (varsayılan, key gerektirmez), `anthropic`, `openai`
+- `orchestrator/mcp_server.py` — orchestrator'ı MCP tool'ları olarak dışarı açar (submit_job, get_job_status, scale_workers, list_workers)
+- `worker/` — worker process: kuyruktan görev çeker, kendi worktree'sinde çalıştırır, LLM'den yorum alır, sonucu yayınlar
+- `target_repo_seed/` — worker worktree'lerinin bootstrap edildiği örnek "çalışma kod tabanı" (sample strategy.py); `target_repo/` ilk çalıştırmada buradan üretilir ve git-ignore'ludur
 - `scripts/demo.py` — uçtan uca demo client
+- `scripts/listen.py` — bir job'ın canlı inter-agent mesaj akışını izler
 
-Sonraki günlerde eklenecek: multi-LLM, inter-agent mesajlaşma (pub/sub),
-RAG/shared memory, MCP entegrasyonu, gerçek multi-machine clustering.
+Sırada: gerçek multi-machine clustering (Redis zaten network-erişilebilir
+olduğu için worker'lar farklı makinelerde de çalışabilir — sadece
+`ORCH_REDIS_URL`'i paylaşılan bir Redis'e işaret ettirmek yeterli).
+
+### Multi-LLM
+
+`.env`'de `ORCH_LLM_PROVIDER=anthropic` (+ `ORCH_ANTHROPIC_API_KEY=...`) veya
+`ORCH_LLM_PROVIDER=openai` (+ `ORCH_OPENAI_API_KEY=...`) ayarlanmazsa sistem
+otomatik olarak key gerektirmeyen `mock` provider'a düşer — demo API key
+olmadan da tam çalışır.
+
+### MCP
+
+Orchestrator API'sini bir MCP client'a (Claude Desktop/Code) araç olarak
+açmak için (orchestrator ayrı bir terminalde çalışıyor olmalı):
+
+```powershell
+python -m orchestrator.mcp_server
+```
 
 ## Kurulum
 
@@ -48,6 +73,13 @@ gösterir):
 
 ```powershell
 python scripts/demo.py --workers 5
+```
+
+Terminal 3 (opsiyonel) — bir job'ın canlı mesaj akışını izle (job_id'yi
+demo çıktısından ya da `POST /jobs` cevabından al):
+
+```powershell
+python scripts/listen.py <job_id>
 ```
 
 ## API
