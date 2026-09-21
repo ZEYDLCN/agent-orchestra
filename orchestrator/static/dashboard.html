@@ -1,219 +1,88 @@
 <!DOCTYPE html>
 <html lang="tr">
 <head>
-<meta charset="UTF-8">
-<title>Agent Orchestration Tool</title>
-<style>
-  :root {
-    --bg: #0f1117; --panel: #171a24; --border: #2a2f3d; --text: #e6e8ef;
-    --muted: #8b90a3; --accent: #5b8cff; --good: #35c987; --bad: #ff5b6e;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; font-family: -apple-system, Segoe UI, Roboto, sans-serif;
-    background: var(--bg); color: var(--text); padding: 24px;
-  }
-  h1 { font-size: 20px; margin: 0 0 4px; }
-  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  .panel {
-    background: var(--panel); border: 1px solid var(--border);
-    border-radius: 10px; padding: 16px;
-  }
-  .panel h2 { font-size: 14px; margin: 0 0 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
-  th { color: var(--muted); font-weight: 500; }
-  tr:last-child td { border-bottom: none; }
-  .controls { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
-  input[type=number] {
-    width: 70px; background: #0f1117; border: 1px solid var(--border);
-    color: var(--text); border-radius: 6px; padding: 6px 8px;
-  }
-  button {
-    background: var(--accent); color: white; border: none; border-radius: 6px;
-    padding: 7px 14px; cursor: pointer; font-size: 13px;
-  }
-  button:hover { opacity: .9; }
-  button.secondary { background: #2a2f3d; }
-  .status-running { color: var(--good); }
-  .status-stopped { color: var(--bad); }
-  .score { font-variant-numeric: tabular-nums; }
-  .job-id { font-family: monospace; color: var(--muted); font-size: 12px; word-break: break-all; }
-  .commentary { color: var(--muted); font-size: 12px; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .full-width { grid-column: 1 / -1; }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f4f8">
+  <title>AgentOS · Orkestrasyon çalışma alanı</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%2323343e'/%3E%3Cpath d='M8 23V14h4v9m2 0V8h4v15m2 0V11h4v12' stroke='%2381ded9' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/dashboard.css">
+  <script src="/static/dashboard.js" defer></script>
 </head>
 <body>
-  <h1>Agent Orchestration Tool</h1>
-  <div class="subtitle">clustered multi-agent orchestration &middot; worktree izolasyonu &middot; canli sonuc akisi</div>
-
-  <div class="grid">
-    <div class="panel">
-      <h2>Workers</h2>
-      <div class="controls">
-        <input type="number" id="scaleInput" min="0" value="5">
-        <button onclick="scaleWorkers()">Scale</button>
-        <button class="secondary" onclick="refreshWorkers()">Yenile</button>
-      </div>
-      <table>
-        <thead><tr><th>worker</th><th>pid</th><th>branch</th><th>status</th><th></th></tr></thead>
-        <tbody id="workersBody"></tbody>
-      </table>
-    </div>
-
-    <div class="panel">
-      <h2>Job</h2>
-      <div class="controls">
-        <button onclick="runDemoJob()">Demo grid calistir (9 task)</button>
-      </div>
-      <div id="jobMeta" class="job-id">henuz job yok</div>
-      <table style="margin-top:10px">
-        <thead><tr><th>done</th><th>failed</th><th>bekleyen</th></tr></thead>
-        <tbody><tr>
-          <td id="jobDone">-</td><td id="jobFailed">-</td><td id="jobPending">-</td>
-        </tr></tbody>
-      </table>
-    </div>
-
-    <div class="panel full-width">
-      <h2>Job gecmisi (takip)</h2>
-      <table>
-        <thead><tr><th>job_id</th><th>zaman</th><th>done</th><th>failed</th><th>bekleyen</th><th></th></tr></thead>
-        <tbody id="jobHistoryBody"></tbody>
-      </table>
-    </div>
-
-    <div class="panel full-width">
-      <h2>Canli sonuclar (en yuksek skor ustte)</h2>
-      <table>
-        <thead><tr><th>worker</th><th>params</th><th>skor</th><th>llm</th><th>yorum</th><th>ms</th></tr></thead>
-        <tbody id="resultsBody"></tbody>
-      </table>
+  <a class="skip-link" href="#mainContent">İçeriğe geç</a>
+  <div class="app-shell">
+    <aside class="rail" aria-label="Ana gezinme">
+      <a class="brand" href="/dashboard" aria-label="AgentOS ana sayfa"><span></span><span></span><span></span></a>
+      <div class="rail-divider"></div>
+      <button class="rail-button active" data-view="overview" aria-label="Genel bakış" title="Genel bakış" aria-current="page"><i data-icon="layout"></i></button>
+      <button class="rail-button" data-view="results" aria-label="Sonuçlar" title="Sonuçlar"><i data-icon="chart"></i></button>
+      <button class="rail-button" data-view="activity" aria-label="Aktivite" title="Aktivite"><i data-icon="activity"></i></button>
+      <button class="rail-button" data-open-workers aria-label="Worker yönetimi" title="Worker yönetimi"><i data-icon="bot"></i></button>
+      <div class="rail-divider"></div>
+      <a class="rail-button" href="/docs" target="_blank" rel="noopener" aria-label="API dokümantasyonu" title="API dokümantasyonu"><i data-icon="book"></i></a>
+      <button class="rail-button" id="helpButton" aria-label="Kullanım rehberi" title="Kullanım rehberi"><i data-icon="help"></i></button>
+      <div class="rail-bottom"><span class="workspace-avatar" title="Yerel çalışma alanı">AO</span></div>
+    </aside>
+    <div class="workspace">
+      <header class="topbar">
+        <div class="breadcrumbs"><span class="workspace-name">Çalışma alanı</span><span class="slash">/</span><span class="breadcrumb-current"><i data-icon="layers"></i> Orkestrasyon</span></div>
+        <div class="topbar-actions">
+          <label class="global-search"><i data-icon="search"></i><input id="globalSearch" type="search" placeholder="İş ara…" aria-label="İş geçmişinde ara"><kbd>Ctrl K</kbd></label>
+          <button class="brain-button" id="insightButton"><span class="brain-icon"><i data-icon="sparkles"></i></span><span>Agent Insights</span></button>
+          <button class="icon-button theme-button" id="themeButton" aria-label="Koyu temaya geç" title="Temayı değiştir"><i data-icon="moon"></i></button>
+          <span class="connection-indicator" id="connectionIndicator" title="Bağlantı kontrol ediliyor" role="status"><span class="dot"></span><span id="connectionText">Bağlanıyor</span></span>
+        </div>
+      </header>
+      <main id="mainContent">
+        <div class="page-heading">
+          <div><div class="eyebrow">BİRLİKTE ÇALIŞAN AGENT’LAR, DAHA İYİ SONUÇLAR</div><h1>Orkestrasyon merkezi<span class="title-dot">.</span></h1><p>İşleri dağıtın, ilerlemeyi izleyin, sonuçları birlikte değerlendirin.</p></div>
+          <button class="button primary" data-new-job><i data-icon="plus"></i> Yeni iş oluştur</button>
+        </div>
+        <nav class="view-tabs" aria-label="Çalışma alanı görünümleri">
+          <button class="view-tab active" data-view="overview" aria-current="page"><i data-icon="layout"></i> Genel bakış</button>
+          <button class="view-tab" data-view="results"><i data-icon="chart"></i> Sonuçlar <span class="tab-count" id="resultCount">0</span></button>
+          <button class="view-tab" data-view="activity"><i data-icon="activity"></i> Aktivite akışı</button>
+          <button class="view-tab" data-open-workers><i data-icon="bot"></i> Worker’lar <span class="tab-count" id="workerCount">0</span></button>
+          <span class="live-label"><span class="dot"></span> Otomatik yenilenir</span>
+        </nav>
+        <div class="workbench">
+          <section class="jobs-panel" aria-labelledby="jobsHeading">
+            <div class="panel-heading"><h2 id="jobsHeading">İş geçmişi <span class="count-label" id="jobCount">0</span></h2><div class="inline-actions"><button class="icon-button" id="refreshButton" aria-label="Verileri yenile" title="Yenile"><i data-icon="refresh"></i></button><button class="icon-button" data-new-job aria-label="Yeni iş oluştur" title="Yeni iş"><i data-icon="plus"></i></button></div></div>
+            <div class="jobs-tools"><label class="local-search"><i data-icon="search"></i><input id="jobSearch" type="search" placeholder="İş kimliğiyle ara…" aria-label="İş kimliğiyle ara"></label><div class="filter-tabs" aria-label="İş durumu filtresi"><button class="active" data-filter="all" aria-pressed="true">Tümü <span id="allCount">0</span></button><button data-filter="active" aria-pressed="false">Aktif <span id="activeCount">0</span></button><button data-filter="completed" aria-pressed="false">Biten <span id="completedCount">0</span></button></div></div>
+            <div id="jobList" class="job-list" aria-live="polite"><div class="empty-list"><span class="empty-icon"><i data-icon="layers"></i></span><h3>İşler yükleniyor</h3><p>Çalışma alanınız hazırlanıyor.</p></div></div>
+            <div class="list-footer"><i data-icon="history"></i> Son 20 çalışma</div>
+          </section>
+          <section class="detail-panel" aria-label="İş detayları">
+            <div class="detail-heading"><div><div class="eyebrow">ÇALIŞMA DETAYI</div><h2 id="jobTitle">Birlikte daha fazlası mümkün</h2><div class="job-subtitle"><span id="jobStatus" class="badge neutral">Başlamaya hazır</span><span id="jobId" class="mono">İlk işinizi oluşturun</span></div></div><button class="icon-button" id="copyButton" aria-label="İş kimliğini kopyala" title="İş kimliğini kopyala" disabled><i data-icon="copy"></i></button></div>
+            <div id="overviewView" class="content-view">
+              <div class="context-card"><div class="context-title"><span class="section-label">İŞ BAĞLAMI</span><span class="separator-dot">·</span><span id="jobContext">Parametre grid’i · Backtest</span><i data-icon="git-branch"></i></div><div class="context-grid"><div><span class="field-label">GÖREV SAYISI</span><strong id="totalTasks">—</strong></div><div><span class="field-label">ÇALIŞMA TÜRÜ</span><strong id="jobType">Grid taraması</strong></div><div><span class="field-label">HEDEF</span><strong class="goal-label"><i data-icon="target"></i> En iyi skoru bul</strong></div></div></div>
+              <div class="progress-section"><div class="progress-ring" id="progressRing" role="progressbar" aria-label="Tamamlanan görevler" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div><strong id="progressPercent">0%</strong></div></div><div class="progress-description"><span class="section-label">ÇALIŞMA İLERLEMESİ</span><strong id="progressTitle">Yeni bir fikirle başlayın</strong><span id="progressDescription">Görevlerinizin ilerlemesi burada görünecek.</span></div></div>
+              <div class="metrics"><div><span class="metric-label"><span class="dot green"></span> Tamamlanan</span><strong id="jobDone">—</strong></div><div><span class="metric-label"><span class="dot amber"></span> Bekleyen / çalışan</span><strong id="jobPending">—</strong></div><div><span class="metric-label"><span class="dot red"></span> Başarısız</span><strong id="jobFailed">—</strong></div></div>
+              <div class="notice" id="jobNotice"><i data-icon="info"></i><span>Bir grid oluşturun; worker’lar her kombinasyonu sizin için değerlendirsin.</span></div>
+              <div class="section-heading"><h3><i data-icon="chart"></i> En iyi sonuçlar</h3><button class="text-button" data-view="results">Tümünü gör <i data-icon="arrow-right"></i></button></div>
+              <div id="topResults"></div>
+              <div class="getting-started" id="gettingStarted"><div class="orchestration-art" aria-hidden="true"><span class="art-node node-one"><i data-icon="bot"></i></span><span class="art-line line-one"></span><span class="art-core"><i data-icon="layers"></i></span><span class="art-line line-two"></span><span class="art-node node-two"><i data-icon="bot"></i></span><span class="art-node node-three"><i data-icon="bot"></i></span></div><h3>Bir iş. Birden fazla agent.</h3><p>Parametrelerinizi paralel çalıştırın.<br>En iyi sonucu tek bir yerde keşfedin.</p><button class="button" data-new-job><i data-icon="play"></i> İlk grid’i oluştur</button><span class="small-note">3 × 3 parametre · 9 görev · Tek çalışma alanı</span></div>
+            </div>
+            <div id="resultsView" class="content-view" hidden><div class="section-heading"><h3>Tüm sonuçlar</h3><label class="sort-control">Sırala <select id="resultSort" aria-label="Sonuçları sırala"><option value="score">En yüksek skor</option><option value="duration">En kısa süre</option></select></label></div><p class="view-description">Bir sonuca tıklayarak parametreleri ve agent yorumunu inceleyin.</p><div id="allResults"></div></div>
+            <div id="activityView" class="content-view" hidden><div class="section-heading"><h3>Aktivite akışı</h3><span class="badge neutral" id="streamStatus">İş bekleniyor</span></div><p class="view-description">Görev durumları ve worker sonuçları otomatik güncellenir.</p><div id="activityList" class="activity-list"></div></div>
+          </section>
+          <aside class="insights-panel" aria-label="Çalışma özeti ve worker’lar">
+            <div class="aside-section"><span class="section-label">ÇALIŞMA DURUMU</span><div class="system-status" id="systemStatus"><span class="badge neutral">Kontrol ediliyor</span></div></div>
+            <div class="insight-card" id="insightCard" tabindex="-1"><div class="insight-glow"><span class="sparkle-orb"><i data-icon="sparkles"></i></span><span class="decorative-sparkle">✧</span></div><span class="section-label">AGENT INSIGHTS</span><h3 id="insightTitle">Fikirden sonuca, birlikte.</h3><p id="insightText">İlk çalışma tamamlandığında en iyi skor ve agent değerlendirmesi burada yer alacak.</p><span class="insight-footnote" id="insightProvider">Çalışma sonuçlarından beslenir</span></div>
+            <div class="aside-section checklist-section"><h3>Çalışma adımları</h3><ul class="checklist"><li id="stepWorkers"><span class="check-box"></span><span>Worker’ları hazırla</span></li><li id="stepJob"><span class="check-box"></span><span>Parametre grid’ini oluştur</span></li><li id="stepResults"><span class="check-box"></span><span>Görev sonuçlarını topla</span></li><li id="stepReview"><span class="check-box"></span><span>En iyi sonucu değerlendir</span></li></ul></div>
+            <div class="aside-section workers-section"><div class="section-heading"><h3>Worker kümesi</h3><span class="badge neutral" id="clusterCount">0 aktif</span></div><div id="workerPreview" class="worker-preview"><p class="muted">Worker bilgileri yükleniyor.</p></div><button class="button full-width" data-open-workers><i data-icon="sliders"></i> Worker’ları yönet</button></div>
+            <div class="workspace-note"><i data-icon="shield"></i><div><strong>İzole çalışma alanları</strong><p>Her worker, kendi git worktree’sinde bağımsız çalışır.</p></div></div>
+          </aside>
+        </div>
+        <footer class="page-footer"><span><span class="footer-mark">a</span> AgentOS <span class="footer-divider">/</span> Multi-agent workspace</span><span id="lastUpdated">Çalışma alanınızla bağlantı kuruluyor</span></footer>
+      </main>
     </div>
   </div>
-
-<script>
-let currentJobId = null;
-let eventSource = null;
-const results = [];
-const seenResultKeys = new Set();
-
-async function refreshWorkers() {
-  const res = await fetch('/workers');
-  const workers = await res.json();
-  const body = document.getElementById('workersBody');
-  body.innerHTML = workers.map(w => `
-    <tr>
-      <td>${w.worker_id}</td>
-      <td>${w.pid}</td>
-      <td>${w.branch}</td>
-      <td class="status-${w.status}">${w.status}</td>
-      <td><button class="secondary" onclick="stopWorker('${w.worker_id}')">durdur</button></td>
-    </tr>`).join('');
-}
-
-async function scaleWorkers() {
-  const count = parseInt(document.getElementById('scaleInput').value, 10);
-  await fetch('/workers/scale', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({count}),
-  });
-  refreshWorkers();
-}
-
-async function stopWorker(id) {
-  await fetch(`/workers/${id}`, {method: 'DELETE'});
-  refreshWorkers();
-}
-
-async function refreshJobMeta() {
-  if (!currentJobId) return;
-  const res = await fetch(`/jobs/${currentJobId}`);
-  if (!res.ok) return;
-  const job = await res.json();
-  document.getElementById('jobDone').textContent = job.done;
-  document.getElementById('jobFailed').textContent = job.failed;
-  document.getElementById('jobPending').textContent = job.pending_or_running;
-}
-
-function renderResults() {
-  const sorted = [...results].sort((a, b) => b.score - a.score);
-  document.getElementById('resultsBody').innerHTML = sorted.map(r => `
-    <tr>
-      <td>${r.worker_id}</td>
-      <td>${JSON.stringify(r.params)}</td>
-      <td class="score">${r.score}</td>
-      <td>${r.llm_provider}</td>
-      <td class="commentary" title="${(r.commentary || '').replace(/"/g, '&quot;')}">${r.commentary || ''}</td>
-      <td>${r.duration_ms}</td>
-    </tr>`).join('');
-}
-
-function loadJob(jobId) {
-  results.length = 0;
-  seenResultKeys.clear();
-  renderResults();
-  if (eventSource) eventSource.close();
-
-  currentJobId = jobId;
-  document.getElementById('jobMeta').textContent = `job_id: ${currentJobId}`;
-  refreshJobMeta();
-
-  // late subscribers get the job's already-published events replayed first,
-  // so this also works for re-opening a job that already finished.
-  eventSource = new EventSource(`/jobs/${currentJobId}/events`);
-  eventSource.onmessage = (msg) => {
-    const event = JSON.parse(msg.data);
-    if (event.type === 'task_result') {
-      const key = `${event.data.worker_id}:${JSON.stringify(event.data.params)}:${event.ts}`;
-      if (!seenResultKeys.has(key)) {
-        seenResultKeys.add(key);
-        results.push(event.data);
-        renderResults();
-      }
-    }
-    refreshJobMeta();
-  };
-}
-
-async function runDemoJob() {
-  const grid = [];
-  for (const fast of [5, 10, 20]) {
-    for (const slow of [50, 100, 200]) {
-      grid.push({params: {fast_ma: fast, slow_ma: slow}});
-    }
-  }
-
-  const res = await fetch('/jobs', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({tasks: grid}),
-  });
-  const job = await res.json();
-  loadJob(job.job_id);
-  refreshJobHistory();
-}
-
-async function refreshJobHistory() {
-  const res = await fetch('/jobs?limit=20');
-  if (!res.ok) return;
-  const jobs = await res.json();
-  document.getElementById('jobHistoryBody').innerHTML = jobs.map(j => `
-    <tr>
-      <td class="job-id">${j.job_id.slice(0, 8)}</td>
-      <td>${new Date(j.created_at * 1000).toLocaleTimeString('tr-TR')}</td>
-      <td>${j.done}</td>
-      <td>${j.failed}</td>
-      <td>${j.pending_or_running}</td>
-      <td><button class="secondary" onclick="loadJob('${j.job_id}')">goster</button></td>
-    </tr>`).join('');
-}
-
-refreshWorkers();
-refreshJobHistory();
-setInterval(refreshWorkers, 3000);
-setInterval(refreshJobMeta, 2000);
-setInterval(refreshJobHistory, 5000);
-</script>
+  <dialog id="newJobDialog" aria-labelledby="newJobTitle"><form id="newJobForm"><div class="dialog-heading"><div><span class="eyebrow">YENİ ÇALIŞMA</span><h2 id="newJobTitle">Bir sonraki sonucu keşfedin.</h2></div><button type="button" class="icon-button" data-close-dialog aria-label="Kapat"><i data-icon="x"></i></button></div><p class="muted">Her hızlı ve yavaş ortalama kombinasyonu ayrı bir görev olarak çalıştırılır.</p><label class="form-label" for="fastParams">Hızlı hareketli ortalama</label><input class="form-input" id="fastParams" value="5, 10, 20" required autocomplete="off"><label class="form-label" for="slowParams">Yavaş hareketli ortalama</label><input class="form-input" id="slowParams" value="50, 100, 200" required autocomplete="off"><div class="form-hint">Pozitif tam sayıları virgülle ayırın. En fazla 100 kombinasyon.</div><div class="grid-summary"><i data-icon="layers"></i><span id="gridSummary">3 × 3 parametre = 9 görev</span></div><p class="form-warning" id="noWorkersWarning" hidden>Aktif worker yok. İş kuyruğa alınır; çalıştırmak için worker ekleyin.</p><p id="jobFormError" class="form-error" role="alert"></p><div class="dialog-footer"><button type="button" class="button" data-close-dialog>Vazgeç</button><button type="submit" class="button primary" id="submitJobButton"><i data-icon="play"></i> Çalışmayı başlat</button></div></form></dialog>
+  <dialog id="workersDialog" class="workers-dialog" aria-labelledby="workersTitle"><div class="dialog-heading"><div><span class="eyebrow">KÜME YÖNETİMİ</span><h2 id="workersTitle">Birlikte çalışan worker’lar</h2></div><button class="icon-button" data-close-dialog aria-label="Kapat"><i data-icon="x"></i></button></div><p class="muted">Kümenizi büyütün veya worker’ları ayrı ayrı durdurun.</p><form id="scaleForm" class="scale-form"><label for="scaleInput">En az worker sayısı</label><input class="form-input" type="number" id="scaleInput" min="0" max="50" value="5" required><button type="submit" class="button primary" id="scaleButton">Kümeyi büyüt</button></form><p class="form-hint">Mevcut sayıdan düşük bir değer worker’ları durdurmaz.</p><p id="workerFormError" class="form-error" role="alert"></p><div id="workersList" class="workers-list"></div></dialog>
+  <dialog id="resultDialog" aria-labelledby="resultTitle"><div class="dialog-heading"><div><span class="eyebrow">SONUÇ DETAYI</span><h2 id="resultTitle">Agent değerlendirmesi</h2></div><button class="icon-button" data-close-dialog aria-label="Kapat"><i data-icon="x"></i></button></div><div id="resultDetail"></div></dialog>
+  <dialog id="helpDialog" aria-labelledby="helpTitle"><div class="dialog-heading"><h2 id="helpTitle">İlk çalışmanıza başlayın</h2><button class="icon-button" data-close-dialog aria-label="Kapat"><i data-icon="x"></i></button></div><ol class="help-steps"><li><strong>Worker ekleyin.</strong><p>Worker yönetiminden kümenizin büyüklüğünü belirleyin.</p></li><li><strong>Yeni iş oluşturun.</strong><p>Hızlı ve yavaş hareketli ortalama değerleriyle bir parametre grid’i tanımlayın.</p></li><li><strong>Sonuçları karşılaştırın.</strong><p>İlerlemeyi canlı izleyin; skora göre sıralanan sonuçlardan agent yorumlarını açın.</p></li></ol><a class="button" href="/docs" target="_blank" rel="noopener">API dokümantasyonu <i data-icon="arrow-right"></i></a></dialog>
+  <div class="toast" id="toast" role="status" hidden></div>
 </body>
 </html>

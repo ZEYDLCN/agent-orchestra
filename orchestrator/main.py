@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from orchestrator.config import settings
 from orchestrator.messaging import MessageBus
@@ -32,6 +33,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Agent Orchestration Tool", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=DASHBOARD_HTML_PATH.parent), name="static")
 
 
 @app.get("/health")

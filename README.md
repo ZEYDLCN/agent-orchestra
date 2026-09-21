@@ -69,12 +69,22 @@ uvicorn orchestrator.main:app --reload --port 8000
 ```
 
 **Seçenek A — dashboard'dan (sunum için önerilen):** tarayıcıda
-`http://localhost:8000/dashboard` aç, "Scale" ile worker sayısını ayarla,
-"Demo grid calistir" butonuna bas. Worker durumu, job ilerlemesi ve
-sonuçlar (skora göre sıralı, LLM yorumuyla birlikte) canlı akar. "Job
-gecmisi" panelinde önceki çalıştırmalar listelenir — "goster" ile
-tamamlanmış bir job'ın sonuçlarına da tekrar bakılabilir (event log'dan
-replay edilir).
+`http://localhost:8000/dashboard` aç. "Worker’ları yönet" üzerinden
+"Kümeyi büyüt" ile worker ekle; "Yeni iş oluştur" ile parametre grid’ini
+başlat. Varsayılan grid 9 görev içerir, değerler formdan değiştirilebilir.
+
+Dashboard açık/pastel tema, koyu tema ve mobil düzen içerir. Soldaki iş
+geçmişinden çalışmaları seçebilir, kimlikle arayabilir (`Ctrl/Cmd + K`) ve
+duruma göre filtreleyebilirsin. Genel bakış, Sonuçlar ve Aktivite akışı
+görünümlerinde ilerleme, hata ayrıntıları ve LLM yorumları görüntülenir.
+Sonuçlar görev kayıtlarından okunur; SSE olayları erken yenilemeyi tetikler,
+4 saniyelik sorgulama bağlantı kesintilerinde takibi sürdürür. Böylece olay
+geçmişinin süresi dolmuş eski işlerin sonuçları da görüntülenebilir.
+
+"Agent Insights" en yüksek skorlu sonucun mevcut LLM yorumunu gösterir;
+ek bir model çağrısı yapmaz. Mock sağlayıcının yorumları açıkça etiketlenir.
+Worker sayısını azaltmak için yönetim penceresinden worker’ları ayrı ayrı
+durdurmak gerekir; "Kümeyi büyüt" yalnızca yeni worker ekler.
 
 **Seçenek B — CLI'dan:**
 
@@ -109,3 +119,17 @@ python scripts/listen.py <job_id>
 pip install -r requirements-dev.txt
 pytest
 ```
+
+İsteğe bağlı tarayıcı kontrolü (orchestrator çalışırken):
+
+```powershell
+pip install playwright
+python -m playwright install chromium
+python scripts/check_dashboard.py --base-url http://127.0.0.1:8000
+```
+
+Bu kontrol gerçek HTML/CSS/JavaScript dosyalarını kullanır; API cevaplarını
+test verileriyle değiştirir, gerçek worker veya iş oluşturmaz. İş oluşturma,
+filtreleme, worker yönetimi, hata/bağlantı durumları, sonuç detayları, tema
+kalıcılığı ve farklı ekran boyutlarını kontrol eder. Ekran görüntüleri
+`workspace/ui-check/` dizinine kaydedilir.
