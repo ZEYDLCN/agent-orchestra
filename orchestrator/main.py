@@ -69,12 +69,33 @@ def submit_job(req: JobSubmitRequest):
     if not req.tasks:
         raise HTTPException(400, "tasks must not be empty")
     job_id = uuid.uuid4().hex
+    task_queue.register_job(job_id)
     task_ids = []
     for payload in req.tasks:
         task = Task(job_id=job_id, payload=payload)
         task_queue.push_task(task)
         task_ids.append(task.task_id)
     return JobSubmitResponse(job_id=job_id, task_ids=task_ids)
+
+
+@app.get("/jobs")
+def list_jobs(limit: int = 20):
+    """Recent job history for tracking past runs, not just the one
+    currently open in a browser tab."""
+    summaries = []
+    for job_id, created_at in task_queue.list_recent_jobs(limit=limit):
+        tasks = task_queue.get_job_tasks(job_id)
+        done = [t for t in tasks if t.status == "done"]
+        failed = [t for t in tasks if t.status == "failed"]
+        summaries.append({
+            "job_id": job_id,
+            "created_at": created_at,
+            "total": len(tasks),
+            "done": len(done),
+            "failed": len(failed),
+            "pending_or_running": len(tasks) - len(done) - len(failed),
+        })
+    return summaries
 
 
 @app.get("/jobs/{job_id}")

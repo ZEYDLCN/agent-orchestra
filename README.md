@@ -71,7 +71,10 @@ uvicorn orchestrator.main:app --reload --port 8000
 **Seçenek A — dashboard'dan (sunum için önerilen):** tarayıcıda
 `http://localhost:8000/dashboard` aç, "Scale" ile worker sayısını ayarla,
 "Demo grid calistir" butonuna bas. Worker durumu, job ilerlemesi ve
-sonuçlar (skora göre sıralı, LLM yorumuyla birlikte) canlı akar.
+sonuçlar (skora göre sıralı, LLM yorumuyla birlikte) canlı akar. "Job
+gecmisi" panelinde önceki çalıştırmalar listelenir — "goster" ile
+tamamlanmış bir job'ın sonuçlarına da tekrar bakılabilir (event log'dan
+replay edilir).
 
 **Seçenek B — CLI'dan:**
 
@@ -96,6 +99,7 @@ python scripts/listen.py <job_id>
 - `GET /workers` — aktif worker listesi
 - `DELETE /workers/{id}` — worker'ı durdur, worktree'sini temizle
 - `POST /jobs {"tasks": [{"params": {...}}, ...]}` — iş gönder, task'lara böl
+- `GET /jobs?limit=20` — son job'ların özet listesi (takip/geçmiş)
 - `GET /jobs/{job_id}` — iş durumu ve sonuçları
 - `GET /jobs/{job_id}/events` — job'ın inter-agent mesaj akışı, Server-Sent Events olarak (geç bağlanan client'lar için son 200 event replay edilir, sonra canlıya geçilir)
 

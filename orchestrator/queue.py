@@ -1,9 +1,10 @@
 """Redis-backed task queue + job/result bookkeeping.
 
 Layout in Redis:
-  list   queue:pending                 -> task_ids waiting to be picked up
-  hash   task:{task_id}                -> Task JSON (mutable state)
-  set    job:{job_id}:tasks            -> task_ids belonging to a job
+  list       queue:pending                 -> task_ids waiting to be picked up
+  hash       task:{task_id}                -> Task JSON (mutable state)
+  set        job:{job_id}:tasks            -> task_ids belonging to a job
+  sorted set jobs:index                    -> job_id scored by submission time, for job history
 """
 import json
 import time
@@ -14,6 +15,8 @@ import redis
 from orchestrator.models import Task, TaskStatus
 
 QUEUE_KEY = "queue:pending"
+JOBS_INDEX_KEY = "jobs:index"
+JOBS_INDEX_MAX = 200
 
 
 def _task_key(task_id: str) -> str:
@@ -83,3 +86,10 @@ class TaskQueue:
         task_ids = self.client.smembers(_job_tasks_key(job_id))
         tasks = [self.get_task(tid) for tid in task_ids]
         return [t for t in tasks if t is not None]
+
+    def register_job(self, job_id: str) -> None:
+        self.client.zadd(JOBS_INDEX_KEY, {job_id: time.time()})
+        self.client.zremrangebyrank(JOBS_INDEX_KEY, 0, -JOBS_INDEX_MAX - 1)
+
+    def list_recent_jobs(self, limit: int = 20) -> list[tuple[str, float]]:
+        return self.client.zrevrange(JOBS_INDEX_KEY, 0, limit - 1, withscores=True)

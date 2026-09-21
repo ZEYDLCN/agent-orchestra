@@ -49,3 +49,21 @@ def test_get_job_tasks_returns_all_tasks_for_job(queue):
 
 def test_pop_task_returns_none_on_empty_queue(queue):
     assert queue.pop_task(timeout=1) is None
+
+
+def test_list_recent_jobs_returns_newest_first(queue):
+    queue.register_job("job-old")
+    queue.register_job("job-new")
+
+    jobs = queue.list_recent_jobs(limit=10)
+
+    assert [job_id for job_id, _ in jobs] == ["job-new", "job-old"]
+
+
+def test_list_recent_jobs_respects_limit(queue):
+    for i in range(5):
+        queue.register_job(f"job-{i}")
+
+    jobs = queue.list_recent_jobs(limit=2)
+
+    assert len(jobs) == 2

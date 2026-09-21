@@ -77,6 +77,14 @@
     </div>
 
     <div class="panel full-width">
+      <h2>Job gecmisi (takip)</h2>
+      <table>
+        <thead><tr><th>job_id</th><th>zaman</th><th>done</th><th>failed</th><th>bekleyen</th><th></th></tr></thead>
+        <tbody id="jobHistoryBody"></tbody>
+      </table>
+    </div>
+
+    <div class="panel full-width">
       <h2>Canli sonuclar (en yuksek skor ustte)</h2>
       <table>
         <thead><tr><th>worker</th><th>params</th><th>skor</th><th>llm</th><th>yorum</th><th>ms</th></tr></thead>
@@ -142,27 +150,18 @@ function renderResults() {
     </tr>`).join('');
 }
 
-async function runDemoJob() {
+function loadJob(jobId) {
   results.length = 0;
   seenResultKeys.clear();
   renderResults();
   if (eventSource) eventSource.close();
 
-  const grid = [];
-  for (const fast of [5, 10, 20]) {
-    for (const slow of [50, 100, 200]) {
-      grid.push({params: {fast_ma: fast, slow_ma: slow}});
-    }
-  }
-
-  const res = await fetch('/jobs', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({tasks: grid}),
-  });
-  const job = await res.json();
-  currentJobId = job.job_id;
+  currentJobId = jobId;
   document.getElementById('jobMeta').textContent = `job_id: ${currentJobId}`;
+  refreshJobMeta();
 
+  // late subscribers get the job's already-published events replayed first,
+  // so this also works for re-opening a job that already finished.
   eventSource = new EventSource(`/jobs/${currentJobId}/events`);
   eventSource.onmessage = (msg) => {
     const event = JSON.parse(msg.data);
@@ -178,9 +177,43 @@ async function runDemoJob() {
   };
 }
 
+async function runDemoJob() {
+  const grid = [];
+  for (const fast of [5, 10, 20]) {
+    for (const slow of [50, 100, 200]) {
+      grid.push({params: {fast_ma: fast, slow_ma: slow}});
+    }
+  }
+
+  const res = await fetch('/jobs', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({tasks: grid}),
+  });
+  const job = await res.json();
+  loadJob(job.job_id);
+  refreshJobHistory();
+}
+
+async function refreshJobHistory() {
+  const res = await fetch('/jobs?limit=20');
+  if (!res.ok) return;
+  const jobs = await res.json();
+  document.getElementById('jobHistoryBody').innerHTML = jobs.map(j => `
+    <tr>
+      <td class="job-id">${j.job_id.slice(0, 8)}</td>
+      <td>${new Date(j.created_at * 1000).toLocaleTimeString('tr-TR')}</td>
+      <td>${j.done}</td>
+      <td>${j.failed}</td>
+      <td>${j.pending_or_running}</td>
+      <td><button class="secondary" onclick="loadJob('${j.job_id}')">goster</button></td>
+    </tr>`).join('');
+}
+
 refreshWorkers();
+refreshJobHistory();
 setInterval(refreshWorkers, 3000);
 setInterval(refreshJobMeta, 2000);
+setInterval(refreshJobHistory, 5000);
 </script>
 </body>
 </html>
