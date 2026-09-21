@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>Agent Orchestration Tool</title>
+<style>
+  :root {
+    --bg: #0f1117; --panel: #171a24; --border: #2a2f3d; --text: #e6e8ef;
+    --muted: #8b90a3; --accent: #5b8cff; --good: #35c987; --bad: #ff5b6e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+    background: var(--bg); color: var(--text); padding: 24px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px;
+  }
+  .panel h2 { font-size: 14px; margin: 0 0 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; }
+  tr:last-child td { border-bottom: none; }
+  .controls { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+  input[type=number] {
+    width: 70px; background: #0f1117; border: 1px solid var(--border);
+    color: var(--text); border-radius: 6px; padding: 6px 8px;
+  }
+  button {
+    background: var(--accent); color: white; border: none; border-radius: 6px;
+    padding: 7px 14px; cursor: pointer; font-size: 13px;
+  }
+  button:hover { opacity: .9; }
+  button.secondary { background: #2a2f3d; }
+  .status-running { color: var(--good); }
+  .status-stopped { color: var(--bad); }
+  .score { font-variant-numeric: tabular-nums; }
+  .job-id { font-family: monospace; color: var(--muted); font-size: 12px; word-break: break-all; }
+  .commentary { color: var(--muted); font-size: 12px; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .full-width { grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+  <h1>Agent Orchestration Tool</h1>
+  <div class="subtitle">clustered multi-agent orchestration &middot; worktree izolasyonu &middot; canli sonuc akisi</div>
+
+  <div class="grid">
+    <div class="panel">
+      <h2>Workers</h2>
+      <div class="controls">
+        <input type="number" id="scaleInput" min="0" value="5">
+        <button onclick="scaleWorkers()">Scale</button>
+        <button class="secondary" onclick="refreshWorkers()">Yenile</button>
+      </div>
+      <table>
+        <thead><tr><th>worker</th><th>pid</th><th>branch</th><th>status</th><th></th></tr></thead>
+        <tbody id="workersBody"></tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <h2>Job</h2>
+      <div class="controls">
+        <button onclick="runDemoJob()">Demo grid calistir (9 task)</button>
+      </div>
+      <div id="jobMeta" class="job-id">henuz job yok</div>
+      <table style="margin-top:10px">
+        <thead><tr><th>done</th><th>failed</th><th>bekleyen</th></tr></thead>
+        <tbody><tr>
+          <td id="jobDone">-</td><td id="jobFailed">-</td><td id="jobPending">-</td>
+        </tr></tbody>
+      </table>
+    </div>
+
+    <div class="panel full-width">
+      <h2>Canli sonuclar (en yuksek skor ustte)</h2>
+      <table>
+        <thead><tr><th>worker</th><th>params</th><th>skor</th><th>llm</th><th>yorum</th><th>ms</th></tr></thead>
+        <tbody id="resultsBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+<script>
+let currentJobId = null;
+let eventSource = null;
+const results = [];
+const seenResultKeys = new Set();
+
+async function refreshWorkers() {
+  const res = await fetch('/workers');
+  const workers = await res.json();
+  const body = document.getElementById('workersBody');
+  body.innerHTML = workers.map(w => `
+    <tr>
+      <td>${w.worker_id}</td>
+      <td>${w.pid}</td>
+      <td>${w.branch}</td>
+      <td class="status-${w.status}">${w.status}</td>
+      <td><button class="secondary" onclick="stopWorker('${w.worker_id}')">durdur</button></td>
+    </tr>`).join('');
+}
+
+async function scaleWorkers() {
+  const count = parseInt(document.getElementById('scaleInput').value, 10);
+  await fetch('/workers/scale', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({count}),
+  });
+  refreshWorkers();
+}
+
+async function stopWorker(id) {
+  await fetch(`/workers/${id}`, {method: 'DELETE'});
+  refreshWorkers();
+}
+
+async function refreshJobMeta() {
+  if (!currentJobId) return;
+  const res = await fetch(`/jobs/${currentJobId}`);
+  if (!res.ok) return;
+  const job = await res.json();
+  document.getElementById('jobDone').textContent = job.done;
+  document.getElementById('jobFailed').textContent = job.failed;
+  document.getElementById('jobPending').textContent = job.pending_or_running;
+}
+
+function renderResults() {
+  const sorted = [...results].sort((a, b) => b.score - a.score);
+  document.getElementById('resultsBody').innerHTML = sorted.map(r => `
+    <tr>
+      <td>${r.worker_id}</td>
+      <td>${JSON.stringify(r.params)}</td>
+      <td class="score">${r.score}</td>
+      <td>${r.llm_provider}</td>
+      <td class="commentary" title="${(r.commentary || '').replace(/"/g, '&quot;')}">${r.commentary || ''}</td>
+      <td>${r.duration_ms}</td>
+    </tr>`).join('');
+}
+
+async function runDemoJob() {
+  results.length = 0;
+  seenResultKeys.clear();
+  renderResults();
+  if (eventSource) eventSource.close();
+
+  const grid = [];
+  for (const fast of [5, 10, 20]) {
+    for (const slow of [50, 100, 200]) {
+      grid.push({params: {fast_ma: fast, slow_ma: slow}});
+    }
+  }
+
+  const res = await fetch('/jobs', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({tasks: grid}),
+  });
+  const job = await res.json();
+  currentJobId = job.job_id;
+  document.getElementById('jobMeta').textContent = `job_id: ${currentJobId}`;
+
+  eventSource = new EventSource(`/jobs/${currentJobId}/events`);
+  eventSource.onmessage = (msg) => {
+    const event = JSON.parse(msg.data);
+    if (event.type === 'task_result') {
+      const key = `${event.data.worker_id}:${JSON.stringify(event.data.params)}:${event.ts}`;
+      if (!seenResultKeys.has(key)) {
+        seenResultKeys.add(key);
+        results.push(event.data);
+        renderResults();
+      }
+    }
+    refreshJobMeta();
+  };
+}
+
+refreshWorkers();
+setInterval(refreshWorkers, 3000);
+setInterval(refreshJobMeta, 2000);
+</script>
+</body>
+</html>

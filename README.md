@@ -68,6 +68,13 @@ Terminal 1 — orchestrator:
 uvicorn orchestrator.main:app --reload --port 8000
 ```
 
+**Seçenek A — dashboard'dan (sunum için önerilen):** tarayıcıda
+`http://localhost:8000/dashboard` aç, "Scale" ile worker sayısını ayarla,
+"Demo grid calistir" butonuna bas. Worker durumu, job ilerlemesi ve
+sonuçlar (skora göre sıralı, LLM yorumuyla birlikte) canlı akar.
+
+**Seçenek B — CLI'dan:**
+
 Terminal 2 — demo (5 worker spawn eder, parametre grid'i dağıtır, sonuçları
 gösterir):
 
@@ -84,11 +91,13 @@ python scripts/listen.py <job_id>
 
 ## API
 
+- `GET /dashboard` — canlı web dashboard (worker durumu, job ilerlemesi, sıralı sonuçlar)
 - `POST /workers/scale {"count": 5}` — worker sayısını N'e tamamla
 - `GET /workers` — aktif worker listesi
 - `DELETE /workers/{id}` — worker'ı durdur, worktree'sini temizle
 - `POST /jobs {"tasks": [{"params": {...}}, ...]}` — iş gönder, task'lara böl
 - `GET /jobs/{job_id}` — iş durumu ve sonuçları
+- `GET /jobs/{job_id}/events` — job'ın inter-agent mesaj akışı, Server-Sent Events olarak (geç bağlanan client'lar için son 200 event replay edilir, sonra canlıya geçilir)
 
 ## Test
 

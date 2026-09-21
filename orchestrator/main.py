@@ -1,9 +1,13 @@
+import json
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse, StreamingResponse
 
 from orchestrator.config import settings
+from orchestrator.messaging import MessageBus
 from orchestrator.models import (
     JobSubmitRequest,
     JobSubmitResponse,
@@ -15,7 +19,10 @@ from orchestrator.queue import TaskQueue
 from orchestrator.worker_manager import WorkerManager
 
 task_queue = TaskQueue(settings.redis_url)
+message_bus = MessageBus(settings.redis_url)
 worker_manager = WorkerManager()
+
+DASHBOARD_HTML_PATH = Path(__file__).resolve().parent / "static" / "dashboard.html"
 
 
 @asynccontextmanager
@@ -30,6 +37,11 @@ app = FastAPI(title="Agent Orchestration Tool", lifespan=lifespan)
 @app.get("/health")
 def health():
     return {"status": "ok", "redis": task_queue.ping()}
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard():
+    return DASHBOARD_HTML_PATH.read_text(encoding="utf-8")
 
 
 @app.post("/workers/scale", response_model=list[WorkerInfo])
@@ -80,3 +92,15 @@ def get_job(job_id: str):
         "pending_or_running": len(tasks) - len(done) - len(failed),
         "tasks": tasks,
     }
+
+
+@app.get("/jobs/{job_id}/events")
+def job_events(job_id: str):
+    """Server-Sent Events feed of the inter-agent messages published for
+    this job, so the dashboard can show task results as they land live."""
+
+    def event_stream():
+        for event in message_bus.subscribe(job_id):
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
