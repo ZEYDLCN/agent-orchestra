@@ -3,17 +3,27 @@ import time
 import fakeredis
 import pytest
 
-from orchestrator.metrics import RedisMetrics
 from orchestrator.models import Task, TaskStatus
 from orchestrator.queue import TaskQueue
+
+# Real Redis's built-in cjson round-trips an empty Lua table back to `{}`
+# (verified directly against redis:7-alpine); fakeredis's pure-Python/lupa
+# Lua emulation instead produces `[]`, which fails Task's payload: dict
+# validation. Tests below use a non-empty payload to sidestep that
+# emulator-only quirk rather than paper over it in production code.
+NONEMPTY_PAYLOAD = {"note": "test"}
 
 
 @pytest.fixture
 def queue():
-    q = TaskQueue.__new__(TaskQueue)
-    q.client = fakeredis.FakeStrictRedis(decode_responses=True)
-    q.metrics = RedisMetrics.__new__(RedisMetrics)
-    q.metrics.client = q.client
+    # Real __init__ (talks to a not-yet-connected real Redis client --
+    # redis-py connects lazily, so this doesn't actually touch the
+    # network), then rebind_client swaps in fakeredis *and* re-registers
+    # every Lua script against it in one place, so this fixture can't
+    # silently drift out of sync with queue.py's own script list the way
+    # a hand-maintained one here would.
+    q = TaskQueue()
+    q.rebind_client(fakeredis.FakeStrictRedis(decode_responses=True))
     return q
 
 
@@ -36,7 +46,7 @@ def test_pop_task_returns_none_on_empty_queue(queue):
 
 
 def test_pop_task_respects_capability(queue):
-    task = Task(job_id="job-1", payload={}, required_capability="trading")
+    task = Task(job_id="job-1", payload=NONEMPTY_PAYLOAD, required_capability="trading")
     queue.push_task(task)
 
     assert queue.pop_task(["backtest"], "worker-1", timeout=1) is None
@@ -46,7 +56,7 @@ def test_pop_task_respects_capability(queue):
 
 
 def test_ack_marks_done_with_result(queue):
-    task = Task(job_id="job-1", payload={})
+    task = Task(job_id="job-1", payload=NONEMPTY_PAYLOAD)
     queue.push_task(task)
     queue.pop_task(["backtest"], "worker-1", timeout=1)
 
@@ -59,7 +69,7 @@ def test_ack_marks_done_with_result(queue):
 
 
 def test_nack_retries_until_max_attempts_then_dead_letters(queue):
-    task = Task(job_id="job-1", payload={}, max_attempts=2)
+    task = Task(job_id="job-1", payload=NONEMPTY_PAYLOAD, max_attempts=2)
     queue.push_task(task)
 
     queue.pop_task(["backtest"], "worker-1", timeout=1)
@@ -76,7 +86,7 @@ def test_nack_retries_until_max_attempts_then_dead_letters(queue):
 
 def test_reap_expired_requeues_abandoned_task(queue):
 
-    task = Task(job_id="job-1", payload={})
+    task = Task(job_id="job-1", payload=NONEMPTY_PAYLOAD)
     queue.push_task(task)
     claimed = queue.pop_task(["backtest"], "worker-1", timeout=1)
 
@@ -95,8 +105,62 @@ def test_reap_expired_requeues_abandoned_task(queue):
     assert repopped.attempt_count == 2
 
 
+def test_stale_lease_token_ack_is_rejected_after_reclaim(queue):
+    """The race this whole fencing-token scheme exists for: worker A is
+    slow, not dead -- its lease expires and the reaper hands the task to
+    worker B before A finally calls ack(). A's ack must not be allowed to
+    clobber B's (still in-progress) claim or a result B hasn't produced
+    yet."""
+    task = Task(job_id="job-1", payload=NONEMPTY_PAYLOAD)
+    queue.push_task(task)
+
+    worker_a_claim = queue.pop_task(["backtest"], "worker-A", timeout=1)
+    stale_token = worker_a_claim.lease_token
+
+    expired = queue.get_task(task.task_id)
+    expired.lease_expires_at = time.time() - 1
+    queue.save_task(expired)
+    queue.reap_expired()
+
+    worker_b_claim = queue.pop_task(["backtest"], "worker-B", timeout=1)
+    assert worker_b_claim.lease_token != stale_token
+
+    assert queue.ack(task.task_id, {"score": 1.0}, lease_token=stale_token) is False
+    still_running = queue.get_task(task.task_id)
+    assert still_running.status == TaskStatus.RUNNING
+    assert still_running.assigned_worker == "worker-B"
+
+    assert queue.ack(task.task_id, {"score": 2.0}, lease_token=worker_b_claim.lease_token) is True
+    final = queue.get_task(task.task_id)
+    assert final.status == TaskStatus.DONE
+    assert final.result == {"score": 2.0}
+
+
+def test_renew_lease_extends_expiry_for_matching_token(queue):
+    task = Task(job_id="job-1", payload=NONEMPTY_PAYLOAD)
+    queue.push_task(task)
+    claimed = queue.pop_task(["backtest"], "worker-1", timeout=1)
+    original_expiry = claimed.lease_expires_at
+
+    time.sleep(0.05)
+    assert queue.renew_lease(task.task_id, claimed.lease_token) is True
+
+    renewed = queue.get_task(task.task_id)
+    assert renewed.lease_expires_at > original_expiry
+
+
+def test_renew_lease_rejects_stale_token(queue):
+    task = Task(job_id="job-1", payload=NONEMPTY_PAYLOAD)
+    queue.push_task(task)
+    claimed = queue.pop_task(["backtest"], "worker-1", timeout=1)
+
+    assert queue.renew_lease(task.task_id, "not-the-real-token") is False
+    unchanged = queue.get_task(task.task_id)
+    assert unchanged.lease_expires_at == claimed.lease_expires_at
+
+
 def test_reap_expired_ignores_tasks_with_time_left(queue):
-    task = Task(job_id="job-1", payload={})
+    task = Task(job_id="job-1", payload=NONEMPTY_PAYLOAD)
     queue.push_task(task)
     queue.pop_task(["backtest"], "worker-1", timeout=1)
 
@@ -104,7 +168,7 @@ def test_reap_expired_ignores_tasks_with_time_left(queue):
 
 
 def test_release_lease_requeues_without_counting_as_attempt(queue):
-    task = Task(job_id="job-1", payload={})
+    task = Task(job_id="job-1", payload=NONEMPTY_PAYLOAD)
     queue.push_task(task)
     claimed = queue.pop_task(["backtest"], "worker-1", timeout=1)
     assert claimed.attempt_count == 1
@@ -117,7 +181,7 @@ def test_release_lease_requeues_without_counting_as_attempt(queue):
 
 
 def test_request_cancel_pending_task_removes_it_from_queue(queue):
-    task = Task(job_id="job-1", payload={})
+    task = Task(job_id="job-1", payload=NONEMPTY_PAYLOAD)
     queue.push_task(task)
 
     assert queue.request_cancel(task.task_id) is True
@@ -128,7 +192,7 @@ def test_request_cancel_pending_task_removes_it_from_queue(queue):
 
 
 def test_request_cancel_running_task_dead_letters_on_nack(queue):
-    task = Task(job_id="job-1", payload={})
+    task = Task(job_id="job-1", payload=NONEMPTY_PAYLOAD)
     queue.push_task(task)
     queue.pop_task(["backtest"], "worker-1", timeout=1)
 
@@ -140,7 +204,7 @@ def test_request_cancel_running_task_dead_letters_on_nack(queue):
 
 
 def test_retry_task_resets_failed_task(queue):
-    task = Task(job_id="job-1", payload={}, max_attempts=1)
+    task = Task(job_id="job-1", payload=NONEMPTY_PAYLOAD, max_attempts=1)
     queue.push_task(task)
     queue.pop_task(["backtest"], "worker-1", timeout=1)
     queue.nack(task.task_id, "boom")
@@ -156,7 +220,7 @@ def test_retry_task_resets_failed_task(queue):
 
 
 def test_retry_task_rejects_active_task(queue):
-    task = Task(job_id="job-1", payload={})
+    task = Task(job_id="job-1", payload=NONEMPTY_PAYLOAD)
     queue.push_task(task)
     assert queue.retry_task(task.task_id) is False  # still pending, nothing to retry
 
@@ -172,8 +236,8 @@ def test_get_job_tasks_returns_all_tasks_for_job(queue):
 
 
 def test_get_job_summary_counts_by_status(queue):
-    t1 = Task(job_id="job-s", payload={})
-    t2 = Task(job_id="job-s", payload={}, max_attempts=1)
+    t1 = Task(job_id="job-s", payload=NONEMPTY_PAYLOAD)
+    t2 = Task(job_id="job-s", payload=NONEMPTY_PAYLOAD, max_attempts=1)
     queue.push_task(t1)
     queue.push_task(t2)
 
@@ -205,7 +269,7 @@ def test_list_recent_jobs_respects_limit(queue):
 
 
 def test_delete_job_removes_tasks_and_index(queue):
-    task = Task(job_id="job-del", payload={})
+    task = Task(job_id="job-del", payload=NONEMPTY_PAYLOAD)
     queue.push_task(task)
     queue.register_job("job-del")
 

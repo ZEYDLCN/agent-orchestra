@@ -9,6 +9,7 @@ container reliably kills every child process it spawned.
 """
 import json
 import subprocess
+import uuid
 from pathlib import Path
 
 from orchestrator.config import settings
@@ -35,8 +36,16 @@ def is_docker_available(force_recheck: bool = False) -> bool:
 
 
 def run_in_sandbox(workdir: Path, params: dict) -> dict:
+    # Named so a timeout can kill *this* container specifically -- when
+    # subprocess.run's timeout fires, it kills the `docker` CLI process,
+    # not the container: the CLI is just a client of the Docker daemon,
+    # which keeps the container running independently of whether anyone's
+    # still attached to its logs. Without an explicit `docker kill`, a
+    # timed-out task would leak a running container (still burning CPU,
+    # still executing the untrusted code) for every timeout.
+    container_name = f"sandbox-{uuid.uuid4().hex[:12]}"
     cmd = [
-        "docker", "run", "--rm",
+        "docker", "run", "--rm", "--name", container_name,
         "--network", "none",
         "--read-only",
         "--tmpfs", "/tmp:size=16m,mode=1777",
@@ -54,6 +63,7 @@ def run_in_sandbox(workdir: Path, params: dict) -> dict:
             cmd, capture_output=True, text=True, timeout=settings.sandbox_timeout_seconds,
         )
     except subprocess.TimeoutExpired as exc:
+        subprocess.run(["docker", "kill", container_name], capture_output=True, timeout=10)
         raise SandboxExecutionError(
             f"sandbox execution timed out after {settings.sandbox_timeout_seconds}s"
         ) from exc

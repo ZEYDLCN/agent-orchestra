@@ -65,6 +65,14 @@ def main(base_url: str):
             return
         elif path.startswith('/jobs/'):
             body = details[path.rsplit('/', 1)[-1]]
+        elif method in ('POST', 'DELETE', 'PUT', 'PATCH'):
+            # Any mutating request that falls through unmatched is a bug in
+            # this fixture, not something to silently forward -- forwarding
+            # it would mutate the real, live orchestrator (workers spawned,
+            # jobs submitted) instead of the isolated fixture data above.
+            failures.append(f'unmocked mutating request: {method} {path}')
+            route.fulfill(status=500, json={"detail": f"unmocked in test fixture: {method} {path}"})
+            return
         else:
             route.continue_()
             return
@@ -74,8 +82,15 @@ def main(base_url: str):
         browser = playwright.chromium.launch()
         page = browser.new_page(viewport={"width": 1440, "height": 1050}, device_scale_factor=1)
         page.on('pageerror', lambda error: failures.append(str(error)))
-        page.route(f'{base_url}/jobs**', respond)
-        page.route(f'{base_url}/workers**', respond)
+        # A single catch-all instead of separate '/jobs**' / '/workers**'
+        # globs: Playwright's glob-to-regex translation treats a bare
+        # '**' with no preceding '/' inconsistently (it can collapse to
+        # single-'*' semantics, which doesn't match '/'), so
+        # '{base_url}/workers**' silently failed to match
+        # '{base_url}/workers/scale' and let that POST reach the real
+        # server. respond()'s own path checks already discriminate
+        # precisely, so one origin-wide route is both simpler and correct.
+        page.route(f'{base_url}/**', respond)
         response = page.goto(f'{base_url}/dashboard')
         assert response.status == 200
         expect(page.locator('#jobList')).to_contain_text('Henüz bir çalışma yok')

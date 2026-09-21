@@ -9,8 +9,12 @@ from orchestrator.config import settings
 @pytest.fixture
 def client(monkeypatch):
     server = fakeredis.FakeServer()
-    main_module.task_queue.client = fakeredis.FakeStrictRedis(server=server, decode_responses=True)
-    main_module.task_queue.metrics.client = main_module.task_queue.client
+    # rebind_client (not a bare .client = ...) also re-registers the Lua
+    # scripts against the fake server -- redis-py binds a Script to
+    # whichever client registered it, so a plain attribute swap would
+    # leave ack/nack/cancel/claim silently talking to whatever real Redis
+    # task_queue was originally constructed with.
+    main_module.task_queue.rebind_client(fakeredis.FakeStrictRedis(server=server, decode_responses=True))
     main_module.message_bus.client = fakeredis.FakeStrictRedis(server=server, decode_responses=True)
     main_module.worker_manager.registry.client = fakeredis.FakeStrictRedis(
         server=server, decode_responses=True
@@ -24,7 +28,32 @@ def client(monkeypatch):
 def test_health(client):
     resp = client.get("/health")
     assert resp.status_code == 200
-    assert resp.json()["redis"] is True
+
+
+def test_ready_reports_component_checks(client, monkeypatch):
+    monkeypatch.setattr(settings, "sandbox_enabled", False)  # skip real docker check
+    resp = client.get("/ready")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ready"] is True
+    assert body["checks"] == {"redis": True, "docker_sandbox": True, "llm": True}
+
+
+def test_ready_503s_when_llm_misconfigured_in_production(client, monkeypatch):
+    from orchestrator.llm import factory
+
+    monkeypatch.setattr(settings, "sandbox_enabled", False)
+    monkeypatch.setattr(settings, "environment", "production")
+    monkeypatch.setattr(settings, "llm_provider", "anthropic")
+    monkeypatch.setattr(settings, "anthropic_api_key", None)
+    factory.reset_cache()
+
+    resp = client.get("/ready")
+
+    assert resp.status_code == 503
+    assert resp.json()["ready"] is False
+    assert resp.json()["checks"]["llm"] is False
+    factory.reset_cache()
 
 
 def test_submit_and_get_job(client):

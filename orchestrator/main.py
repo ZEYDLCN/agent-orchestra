@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Query
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_client.core import REGISTRY, CounterMetricFamily, GaugeMetricFamily, SummaryMetricFamily
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -12,6 +12,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from orchestrator.auth import require_api_key
 from orchestrator.config import settings
 from orchestrator.coordinator import propose_refinement
+from orchestrator.llm.factory import get_llm_provider
 from orchestrator.logging_setup import configure_logging
 from orchestrator.messaging import MessageBus
 from orchestrator.models import (
@@ -118,11 +119,32 @@ Instrumentator().instrument(app).expose(app, include_in_schema=False)
 
 @app.get("/health")
 def health():
-    return {
-        "status": "ok",
-        "redis": task_queue.ping(),
-        "environment": settings.environment,
-    }
+    """Liveness: is this process responsive at all. Deliberately cheap
+    (no external calls) -- a container orchestrator restarting on health
+    failures shouldn't kill a perfectly fine process just because Redis
+    had a momentary blip; that distinction is what /ready is for."""
+    return {"status": "ok"}
+
+
+@app.get("/ready")
+def ready():
+    """Readiness: can this instance actually do its job right now."""
+    from worker.sandbox_executor import is_docker_available
+
+    redis_ok = task_queue.ping()
+    sandbox_ok = (not settings.sandbox_enabled) or is_docker_available()
+
+    llm_ok, llm_error = True, None
+    try:
+        get_llm_provider()
+    except Exception as exc:  # noqa: BLE001
+        llm_ok, llm_error = False, str(exc)
+
+    checks = {"redis": redis_ok, "docker_sandbox": sandbox_ok, "llm": llm_ok}
+    body = {"ready": all(checks.values()), "checks": checks, "environment": settings.environment}
+    if llm_error:
+        body["llm_error"] = llm_error
+    return JSONResponse(body, status_code=200 if body["ready"] else 503)
 
 
 @app.get("/dashboard", response_class=HTMLResponse)

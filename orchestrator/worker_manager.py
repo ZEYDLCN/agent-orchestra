@@ -18,6 +18,18 @@ from orchestrator.worktree import (
 
 SCALE_LOCK_KEY = "lock:worker_scale"
 
+# Compare-and-delete: releasing a lock by plain DEL (or GET-then-DEL from
+# Python) can drop someone else's lock if this one's TTL already expired
+# and a new holder acquired it in between -- this only ever deletes the
+# key if it still holds *our* token.
+_RELEASE_LOCK_IF_OWNER = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+else
+  return 0
+end
+"""
+
 
 class WorkerManager:
     """Owns *local* worker processes: creating their git worktree, spawning
@@ -30,6 +42,7 @@ class WorkerManager:
         self._local: dict[str, tuple[WorkerInfo, subprocess.Popen]] = {}
         self._local_lock = threading.Lock()
         self.registry = WorkerRegistry(settings.redis_url)
+        self._release_lock_script = self.registry.client.register_script(_RELEASE_LOCK_IF_OWNER)
         check_git_available()
         ensure_target_repo(settings.target_repo_path, settings.target_repo_seed_path)
 
@@ -96,20 +109,43 @@ class WorkerManager:
             self.registry.deregister(worker_id)
 
     def scale_to(self, count: int) -> list[WorkerInfo]:
-        # a Redis lock serializes concurrent scale requests across threads
-        # *and* across multiple orchestrator processes, so two racing
-        # requests can't both see "current=2" and each spawn up to target
-        # independently, overshooting the requested count.
-        got_lock = self.registry.client.set(SCALE_LOCK_KEY, "1", nx=True, ex=30)
+        # a Redis lock serializes concurrent scale-*up* requests across
+        # threads *and* across multiple orchestrator processes, so two
+        # racing requests can't both see "current=2" and each spawn up to
+        # target independently, overshooting the requested count. The
+        # lock is released by a compare-and-delete Lua script keyed on a
+        # per-call token: a plain DEL could drop a *different* caller's
+        # lock if this one's TTL already expired while we were still
+        # spawning workers.
+        lock_token = uuid.uuid4().hex
+        got_lock = self.registry.client.set(SCALE_LOCK_KEY, lock_token, nx=True, ex=30)
         if not got_lock:
             raise RuntimeError("another scale operation is already in progress")
         try:
             self._reap_dead_local()
-            current = len(self.list_local_workers())
+            current_workers = self.list_local_workers()
+            current = len(current_workers)
             for _ in range(max(0, count - current)):
                 self.spawn_worker()
+            # scale-down candidates are decided here (while holding the
+            # lock, against a consistent snapshot) but actually stopped
+            # below, outside the lock -- a graceful stop can take as long
+            # as a task's full lease, and unlike spawning, stopping a
+            # worker twice or slightly late isn't a correctness problem,
+            # so it doesn't need the same serialization.
+            to_stop = current_workers[: max(0, current - count)]
         finally:
-            self.registry.client.delete(SCALE_LOCK_KEY)
+            self._release_lock_script(keys=[SCALE_LOCK_KEY], args=[lock_token])
+
+        if to_stop:
+            threads = [
+                threading.Thread(target=self.stop_worker, args=(w.worker_id,), daemon=True)
+                for w in to_stop
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
         return self.list_workers()
 
     def list_local_workers(self) -> list[WorkerInfo]:
@@ -139,11 +175,16 @@ class WorkerManager:
         if not exists and not is_local:
             return False
 
-        # cooperative: ask the worker to finish/release its current task
-        # and exit on its own, so an in-flight task isn't just abandoned
+        # cooperative: ask the worker to stop claiming new tasks and exit
+        # once its current one (if any) finishes naturally. The wait is
+        # never shorter than a task's own lease -- falling back to a hard
+        # kill sooner wouldn't actually save time (the reaper would reclaim
+        # around the same point anyway) but would risk killing a task that
+        # was about to finish on its own.
         self.registry.request_stop(worker_id)
 
-        deadline = time.time() + settings.worker_stop_grace_seconds
+        grace_period = max(settings.worker_stop_grace_seconds, settings.task_lease_seconds)
+        deadline = time.time() + grace_period
         while time.time() < deadline:
             if self.registry.get(worker_id) is None:
                 break

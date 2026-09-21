@@ -6,10 +6,14 @@ Registers itself in the Redis worker registry and heartbeats on a
 background thread; a crash or hard kill just lets the registry TTL expire
 and lets the queue's lease reaper reclaim whatever task it was holding.
 A graceful stop (DELETE /workers/{id}) is cooperative: the orchestrator
-sets a stop flag in Redis, this loop notices it between tasks, releases
-its current task's lease if it's holding one, deregisters, and exits --
-no OS signal is required, which matters because Windows' Popen.terminate()
-has no graceful hook.
+sets a stop flag in Redis, and this loop checks it between tasks --
+before claiming a new one, never mid-task -- and exits without claiming
+further work. No OS signal is required, which matters because Windows'
+Popen.terminate() has no graceful hook. The task it's currently holding
+(if any) still runs to completion and is ack'd/nack'd normally; the
+orchestrator's stop-wait window is sized to comfortably outlast a task's
+lease so it doesn't fall back to a hard kill while legitimate work is
+still in flight (see worker_manager.stop_worker).
 """
 import argparse
 import logging
@@ -39,6 +43,16 @@ def heartbeat_loop(registry: WorkerRegistry, info: WorkerInfo, stop_event: threa
     while not stop_event.is_set():
         registry.heartbeat(info)
         stop_event.wait(settings.worker_heartbeat_interval_seconds)
+
+
+def lease_renewal_loop(queue: TaskQueue, task_id: str, lease_token: str, stop_event: threading.Event):
+    """Keeps a slow-but-alive task's lease from expiring mid-run (a slow
+    LLM call, a slow sandbox execution) -- without this, task_lease_seconds
+    is a hard ceiling on task duration regardless of whether the worker is
+    actually still making progress."""
+    interval = settings.task_lease_seconds / 3
+    while not stop_event.wait(interval):
+        queue.renew_lease(task_id, lease_token)
 
 
 def main(worker_id: str, workdir: str):
@@ -81,14 +95,27 @@ def main(worker_id: str, workdir: str):
             info.current_task_id = task.task_id
             log_ctx = {"worker_id": worker_id, "job_id": task.job_id, "task_id": task.task_id, "attempt": task.attempt_count}
             logger.info("running task", extra=log_ctx)
+
+            renewal_stop = threading.Event()
+            renewal_thread = threading.Thread(
+                target=lease_renewal_loop,
+                args=(queue, task.task_id, task.lease_token, renewal_stop),
+                daemon=True,
+            )
+            renewal_thread.start()
             try:
                 result = run_task(task, workdir_path, worker_id, llm, memory, bus)
-                queue.ack(task.task_id, result)
-                logger.info("task done score=%s", result.get("score"), extra=log_ctx)
+                if queue.ack(task.task_id, result, lease_token=task.lease_token):
+                    logger.info("task done score=%s", result.get("score"), extra=log_ctx)
+                else:
+                    logger.warning("ack dropped: lease was reclaimed while running", extra=log_ctx)
             except Exception as exc:  # noqa: BLE001
-                queue.nack(task.task_id, str(exc))
-                logger.warning("task failed: %s", exc, extra=log_ctx)
+                if queue.nack(task.task_id, str(exc), lease_token=task.lease_token):
+                    logger.warning("task failed: %s", exc, extra=log_ctx)
+                else:
+                    logger.warning("nack dropped: lease was reclaimed while running", extra=log_ctx)
             finally:
+                renewal_stop.set()
                 info.current_task_id = None
     finally:
         stop_event.set()

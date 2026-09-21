@@ -29,6 +29,7 @@ class Task(BaseModel):
     attempt_count: int = 0
     max_attempts: int = DEFAULT_MAX_ATTEMPTS
     lease_expires_at: float | None = None
+    lease_token: str | None = None
     cancel_requested: bool = False
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
