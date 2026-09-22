@@ -42,7 +42,7 @@ pathspec==1.1.1
 flatbuffers==25.12.19
 piper-tts==1.8.0
 pip-tools==7.6.1
-playwright==1.49.1
+playwright==1.63.0
 pluggy==1.6.0
 prometheus-fastapi-instrumentator==8.1.0
 prometheus_client==0.26.0
