@@ -49,3 +49,15 @@ yapmadan kontrol etmek için:
 python scripts/generate_demo_voice.py --dry-run
 ```
 
+## Canlı demo videosu
+
+Dashboard ve worker'lar çalışırken aşağıdaki komut gerçek API'yi kullanarak
+1440×900 çözünürlükte, yaklaşık iki dakikalık altyazılı bir demo kaydeder:
+
+```powershell
+python scripts/record_live_demo.py
+```
+
+Çıktı `workspace/demo/agent-orchestra-live-demo.webm` olur. Betik istekleri
+mock'lamaz; worker ölçekleme, 3×3 görev grid'i, sonuç ekranı, aktivite akışı,
+refinement ve JSON dışa aktarma adımlarını canlı sistem üzerinde yürütür.
