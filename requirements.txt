@@ -2,7 +2,7 @@ fastapi==0.141.1
 uvicorn[standard]==0.53.0
 redis==5.2.1
 pydantic==2.13.5
-pydantic-settings==2.7.1
+pydantic-settings==2.15.0
 requests==2.32.3
 mcp==2.2.0
 anthropic==1.7.0
