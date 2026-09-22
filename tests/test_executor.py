@@ -9,6 +9,7 @@ from orchestrator.llm.mock_provider import MockProvider
 from orchestrator.memory import SharedMemory
 from orchestrator.messaging import MessageBus
 from orchestrator.models import Task
+from orchestrator.tracing import TraceStore
 from worker.executor import run_task
 
 SEED_DIR = Path(__file__).resolve().parent.parent / "target_repo_seed"
@@ -88,3 +89,25 @@ def test_llm_failure_does_not_fail_the_whole_task(deps):
     assert result["analysis_status"] == "failed"
     assert result["commentary"] is None
     assert isinstance(result["score"], float)
+
+
+def test_run_task_records_agent_token_trace(deps):
+    llm, memory, bus = deps
+    trace_store = TraceStore.__new__(TraceStore)
+    trace_store.client = memory.client
+    task = Task(
+        job_id="job-1",
+        payload={
+            "params": {"fast_ma": 5, "slow_ma": 200},
+            "_trace_context": {"run_id": "run-1", "round_number": 1},
+        },
+    )
+
+    result = run_task(task, SEED_DIR, "worker-1", llm, memory, bus, trace_store)
+
+    trace = trace_store.list_recent(run_id="run-1")[0]
+    assert trace.agent_id == "worker-1"
+    assert trace.role == "trader"
+    assert trace.job_id == "job-1"
+    assert trace.task_id == task.task_id
+    assert result["llm_usage"]["total_tokens"] == trace.total_tokens

@@ -111,6 +111,28 @@ class AgentRun(BaseModel):
     updated_at: float = Field(default_factory=time.time)
 
 
+class LLMTrace(BaseModel):
+    trace_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    run_id: str | None = None
+    job_id: str | None = None
+    task_id: str | None = None
+    round_number: int | None = None
+    role: str
+    agent_id: str
+    provider: str
+    model: str | None = None
+    status: str = "completed"
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    tokens_estimated: bool = False
+    duration_ms: float = 0.0
+    cost_usd: float | None = None
+    error: str | None = None
+    started_at: float = Field(default_factory=time.time)
+    completed_at: float = Field(default_factory=time.time)
+
+
 class JobMeta(BaseModel):
     job_id: str
     created_at: float = Field(default_factory=time.time)

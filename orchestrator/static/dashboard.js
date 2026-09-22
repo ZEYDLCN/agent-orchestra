@@ -38,7 +38,7 @@ const icon = name => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">$
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const number = (value, digits = 2) => Number.isFinite(Number(value)) ? Number(value).toLocaleString('tr-TR', {maximumFractionDigits:digits}) : '—';
 const time = value => value ? new Date(value * 1000).toLocaleString('tr-TR', {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : '—';
-const state = {jobs:[], workers:[], job:null, jobId:null, agentRun:null, agentRunId:null, agentRunNotified:null, filter:'all', search:'', view:'overview', source:null, reviewed:new Set(), errors:{}, loaded:false};
+const state = {jobs:[], workers:[], job:null, jobId:null, agentRun:null, agentRunId:null, agentRunNotified:null, traces:[], traceSummary:null, filter:'all', search:'', view:'overview', source:null, reviewed:new Set(), errors:{}, loaded:false};
 const DAILY_TASK_BUDGET = 500;
 let refreshBusy = false;
 let detailRequest = null;
@@ -255,6 +255,7 @@ function renderDetail() {
   renderInsights();
   renderChecklist();
   renderAgentRun();
+  renderTraces();
 }
 function resultRow(result,index) {
   const params = Object.entries(result.params || {}).map(([key,value]) => `${key}: ${value}`).join(' · ');
@@ -271,6 +272,24 @@ function renderActivity() {
   const tasks = [...(state.job?.tasks || [])].sort((a,b) => b.updated_at - a.updated_at);
   const labels = {done:'Görev tamamlandı',failed:'Görev başarısız',running:'Görev çalışıyor',pending:'Görev sırada'};
   html('activityList', tasks.length ? tasks.map(task => `<div class="activity-item"><span class="activity-marker ${escapeHTML(task.status)}">${icon(task.status === 'done' ? 'check' : task.status === 'failed' ? 'x' : 'clock')}</span><div><strong>${labels[task.status] || 'Görev güncellendi'}</strong><p>${escapeHTML(task.assigned_worker || 'Worker bekleniyor')} · #${escapeHTML(task.task_id.slice(0,8))}${task.result ? ` · Skor ${number(task.result.score)}` : ''}${task.attempt_count > 1 ? ` · ${task.attempt_count}. deneme` : ''}</p>${task.error ? `<p class="form-error">${escapeHTML(task.error)}</p>` : ''}<time>${escapeHTML(time(task.updated_at))}</time></div>${(task.status === 'failed' || task.status === 'cancelled') ? `<button class="text-button" data-retry-task="${escapeHTML(task.task_id)}">Yeniden dene</button>` : ''}</div>`).join('') : empty('Akış henüz başlamadı', 'Bir iş seçtiğinizde görevlerin durumu burada görünecek.'));
+}
+function renderTraces() {
+  const summary = state.traceSummary;
+  const traces = state.traces || [];
+  $('traceCallCount').textContent = summary?.calls || 0;
+  $('traceScope').textContent = state.job?.meta?.agent_run_id ? 'Agent run' : state.jobId ? 'Seçili iş' : 'İş bekleniyor';
+  const metric = (label,value,detail) => `<div><span>${escapeHTML(label)}</span><strong>${escapeHTML(value)}</strong><small>${escapeHTML(detail)}</small></div>`;
+  html('traceMetrics', summary ? [
+    metric('Toplam token',number(summary.total_tokens,0),`${number(summary.calls,0)} LLM çağrısı`),
+    metric('Giriş',number(summary.input_tokens,0),'prompt token'),
+    metric('Çıkış',number(summary.output_tokens,0),'yanıt token'),
+    metric('Toplam süre',`${number(summary.duration_ms,0)} ms`,summary.failed_calls ? `${summary.failed_calls} hatalı çağrı` : 'Çağrılar tamamlandı'),
+    metric('Tahmini maliyet',summary.cost_usd == null ? '—' : `$${number(summary.cost_usd,6)}`,summary.cost_usd == null ? 'Fiyat yapılandırılmadı' : 'Yerel modeller $0'),
+  ].join('') : '');
+  const maxTokens = Math.max(1,...(summary?.agents || []).map(agent => agent.total_tokens));
+  html('traceAgents', summary?.agents?.length ? summary.agents.map(agent => `<div class="trace-agent-row"><span class="trace-agent-avatar">${icon(agent.roles.includes('planner') ? 'sparkles' : agent.roles.includes('reviewer') ? 'shield' : 'bot')}</span><div class="trace-agent-info"><div><strong>${escapeHTML(agent.agent_id)}</strong><span>${escapeHTML(agent.roles.join(', '))}</span></div><p>${escapeHTML(agent.providers.join(', '))} · ${agent.calls} çağrı · ${number(agent.duration_ms,0)} ms${agent.estimated_calls ? ` · ${agent.estimated_calls} tahmini` : ''}</p><span class="trace-token-bar"><i style="width:${Math.max(4,agent.total_tokens/maxTokens*100)}%"></i></span></div><div class="trace-token-total"><strong>${number(agent.total_tokens,0)}</strong><span>token</span></div></div>`).join('') : empty('Henüz LLM izi yok', 'Bir agent çalışması başladığında kullanım metrikleri burada görünecek.'));
+  const statusLabels = {completed:'Tamamlandı',failed:'Başarısız',timeout:'Zaman aşımı'};
+  html('traceList', traces.length ? traces.map(trace => `<div class="trace-item"><span class="activity-marker ${trace.status === 'completed' ? 'done' : 'failed'}">${icon(trace.status === 'completed' ? 'check' : 'x')}</span><div class="trace-item-main"><div><strong>${escapeHTML(trace.agent_id)}</strong>${badge(statusLabels[trace.status] || trace.status,trace.status === 'completed' ? 'success' : 'danger')}</div><p>${escapeHTML(trace.role)} · ${escapeHTML(trace.provider + (trace.model ? `:${trace.model}` : ''))}${trace.task_id ? ` · görev #${escapeHTML(trace.task_id.slice(0,8))}` : ''}</p><time>${escapeHTML(time(trace.started_at))}</time>${trace.error ? `<p class="form-error">${escapeHTML(trace.error)}</p>` : ''}</div><div class="trace-call-metrics"><strong>${number(trace.total_tokens,0)} token${trace.tokens_estimated ? ' ~' : ''}</strong><span>${number(trace.input_tokens,0)} giriş / ${number(trace.output_tokens,0)} çıkış</span><span>${number(trace.duration_ms,0)} ms</span></div></div>`).join('') : empty('Çağrı zaman çizelgesi boş', 'Planner, Reviewer veya trader bir model çağırdığında kayıtlar burada sıralanacak.'));
 }
 function renderInsights() {
   const best = bestResults()[0];
@@ -295,6 +314,20 @@ function connectStream(jobId) {
   };
   source.onerror = () => { if (state.jobId === jobId) $('streamStatus').textContent = 'Yeniden bağlanıyor · Otomatik takip'; };
 }
+async function refreshTraces() {
+  const runId = state.job?.meta?.agent_run_id || (state.agentRun?.current_job_id === state.jobId ? state.agentRunId : null);
+  const scope = runId ? `run_id=${encodeURIComponent(runId)}` : state.jobId ? `job_id=${encodeURIComponent(state.jobId)}` : '';
+  if (!scope) { state.traces = []; state.traceSummary = null; renderTraces(); return; }
+  try {
+    const [traces,summary] = await Promise.all([api(`/traces?${scope}&limit=200`),api(`/traces/summary?${scope}`)]);
+    state.traces = traces;
+    state.traceSummary = summary;
+    delete state.errors.traces;
+  } catch (error) {
+    state.errors.traces = error.message;
+  }
+  renderTraces();
+}
 async function refreshDetail() {
   const jobId = state.jobId;
   if (!jobId || detailRequest === jobId) return;
@@ -307,6 +340,7 @@ async function refreshDetail() {
     if (!job.pending_or_running) closeStream();
     else connectStream(jobId);
     renderDetail();
+    await refreshTraces();
   } catch (error) {
     if (state.jobId === jobId) {
       state.errors.detail = error.message;
@@ -324,6 +358,8 @@ async function loadJob(jobId) {
   closeStream();
   state.jobId = jobId;
   state.job = null;
+  state.traces = [];
+  state.traceSummary = null;
   delete state.errors.detail;
   $('jobTitle').textContent = 'Çalışma yükleniyor…';
   $('jobId').textContent = `#${jobId.slice(0,12)}`;
@@ -377,7 +413,7 @@ async function refreshAll() {
 }
 function setView(view) {
   state.view = view;
-  for (const name of ['overview','results','activity']) $(`${name}View`).hidden = name !== view;
+  for (const name of ['overview','results','activity','traces']) $(`${name}View`).hidden = name !== view;
   document.querySelectorAll('.view-tab[data-view],.rail-button[data-view]').forEach(button => {
     button.classList.toggle('active',button.dataset.view === view);
     if (button.dataset.view === view) button.setAttribute('aria-current','page');

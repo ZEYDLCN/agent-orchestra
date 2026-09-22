@@ -18,6 +18,7 @@
       <button class="rail-button active" data-view="overview" aria-label="Genel bakış" title="Genel bakış" aria-current="page"><i data-icon="layout"></i></button>
       <button class="rail-button" data-view="results" aria-label="Sonuçlar" title="Sonuçlar"><i data-icon="chart"></i></button>
       <button class="rail-button" data-view="activity" aria-label="Aktivite" title="Aktivite"><i data-icon="activity"></i></button>
+      <button class="rail-button" data-view="traces" aria-label="LLM izleri" title="LLM izleri"><i data-icon="history"></i></button>
       <button class="rail-button" data-open-workers aria-label="Worker yönetimi" title="Worker yönetimi"><i data-icon="bot"></i></button>
       <div class="rail-divider"></div>
       <a class="rail-button" href="/docs" target="_blank" rel="noopener" aria-label="API dokümantasyonu" title="API dokümantasyonu"><i data-icon="book"></i></a>
@@ -44,6 +45,7 @@
           <button class="view-tab active" data-view="overview" aria-current="page"><i data-icon="layout"></i> Genel bakış</button>
           <button class="view-tab" data-view="results"><i data-icon="chart"></i> Sonuçlar <span class="tab-count" id="resultCount">0</span></button>
           <button class="view-tab" data-view="activity"><i data-icon="activity"></i> Aktivite akışı</button>
+          <button class="view-tab" data-view="traces"><i data-icon="history"></i> LLM izleri <span class="tab-count" id="traceCallCount">0</span></button>
           <button class="view-tab" data-open-workers><i data-icon="bot"></i> Worker’lar <span class="tab-count" id="workerCount">0</span></button>
           <span class="live-label"><span class="dot"></span> Otomatik yenilenir</span>
         </nav>
@@ -68,6 +70,7 @@
             </div>
             <div id="resultsView" class="content-view" hidden><div class="section-heading"><h3>Tüm sonuçlar</h3><label class="sort-control">Sırala <select id="resultSort" aria-label="Sonuçları sırala"><option value="score">En yüksek skor</option><option value="duration">En kısa süre</option></select></label></div><p class="view-description">Bir sonuca tıklayarak parametreleri ve agent yorumunu inceleyin.</p><div id="allResults"></div></div>
             <div id="activityView" class="content-view" hidden><div class="section-heading"><h3>Aktivite akışı</h3><span class="badge neutral" id="streamStatus">İş bekleniyor</span></div><p class="view-description">Görev durumları ve worker sonuçları otomatik güncellenir.</p><div id="activityList" class="activity-list"></div></div>
+            <div id="tracesView" class="content-view" hidden><div class="section-heading"><div><h3>LLM izleri</h3><p class="view-description">Planner, Reviewer ve trader çağrılarının token, süre ve durum görünümü.</p></div><span class="badge neutral" id="traceScope">İş bekleniyor</span></div><div id="traceMetrics" class="trace-metrics"></div><div class="section-heading trace-section-heading"><h3>Agent kullanımı</h3></div><div id="traceAgents" class="trace-agents"></div><div class="section-heading trace-section-heading"><h3>Çağrı zaman çizelgesi</h3></div><div id="traceList" class="trace-list"></div></div>
           </section>
           <aside class="insights-panel" aria-label="Çalışma özeti ve worker’lar">
             <div class="aside-section"><span class="section-label">ÇALIŞMA DURUMU</span><div class="system-status" id="systemStatus"><span class="badge neutral">Kontrol ediliyor</span></div></div>

@@ -22,6 +22,18 @@ def main(base_url: str):
     agent_runs: list[dict] = []
     failures: list[str] = []
     details: dict[str, dict] = {}
+    traces = [
+        {"trace_id": "trace-planner", "run_id": None, "job_id": "fixture", "task_id": None,
+         "round_number": 1, "role": "planner", "agent_id": "planner", "provider": "ollama",
+         "model": "qwen2.5:3b", "status": "completed", "input_tokens": 120,
+         "output_tokens": 30, "total_tokens": 150, "tokens_estimated": False,
+         "duration_ms": 220, "cost_usd": 0, "error": None, "started_at": now, "completed_at": now},
+        {"trace_id": "trace-trader", "run_id": None, "job_id": "fixture", "task_id": "task-0000",
+         "round_number": 1, "role": "trader", "agent_id": "worker-00000001", "provider": "ollama",
+         "model": "qwen2.5:3b", "status": "completed", "input_tokens": 80,
+         "output_tokens": 20, "total_tokens": 100, "tokens_estimated": False,
+         "duration_ms": 180, "cost_usd": 0, "error": None, "started_at": now, "completed_at": now},
+    ]
     offline = False
     auth_required = False
 
@@ -58,6 +70,19 @@ def main(base_url: str):
         elif path.startswith('/agent-runs/'):
             run_id = path.rsplit('/', 1)[-1]
             body = next(run for run in agent_runs if run['run_id'] == run_id)
+        elif path.startswith('/traces/summary'):
+            body = {"calls": 2, "input_tokens": 200, "output_tokens": 50, "total_tokens": 250,
+                    "duration_ms": 400, "cost_usd": 0, "failed_calls": 0,
+                    "agents": [
+                        {"agent_id": "planner", "calls": 1, "input_tokens": 120, "output_tokens": 30,
+                         "total_tokens": 150, "duration_ms": 220, "cost_usd": 0, "failed_calls": 0,
+                         "estimated_calls": 0, "roles": ["planner"], "providers": ["ollama:qwen2.5:3b"]},
+                        {"agent_id": "worker-00000001", "calls": 1, "input_tokens": 80, "output_tokens": 20,
+                         "total_tokens": 100, "duration_ms": 180, "cost_usd": 0, "failed_calls": 0,
+                         "estimated_calls": 0, "roles": ["trader"], "providers": ["ollama:qwen2.5:3b"]},
+                    ]}
+        elif path.startswith('/traces?'):
+            body = traces
         elif path == '/workers/scale':
             count = route.request.post_data_json['count']
             for index in range(len(workers), count):
@@ -208,6 +233,11 @@ def main(base_url: str):
         expect(page.locator('#stepReview')).to_have_class('done')
         page.locator('.view-tab[data-view=activity]').click()
         expect(page.locator('.activity-item')).to_have_count(9)
+        page.locator('.view-tab[data-view=traces]').click()
+        expect(page.locator('#traceCallCount')).to_have_text('2')
+        expect(page.locator('.trace-agent-row')).to_have_count(2)
+        expect(page.locator('.trace-item')).to_have_count(2)
+        expect(page.locator('#traceMetrics')).to_contain_text('250')
         page.locator('#jobSearch').fill('missing-job')
         expect(page.locator('#jobList')).to_contain_text('Eşleşen iş bulunamadı')
         page.locator('#jobSearch').fill('')

@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 import orchestrator.main as main_module
 from orchestrator.config import settings
-from orchestrator.models import AgentRun, AgentRunRequest, WorkerInfo
+from orchestrator.models import AgentRun, AgentRunRequest, LLMTrace, WorkerInfo
 
 
 @pytest.fixture
@@ -60,6 +60,30 @@ def test_start_agent_run_dispatches_goal(client, monkeypatch):
 
 def test_get_unknown_agent_run_404s(client):
     assert client.get("/agent-runs/does-not-exist").status_code == 404
+
+
+def test_trace_list_and_summary_endpoints(client):
+    main_module.agent_workflow.trace_store.record(
+        LLMTrace(
+            run_id="run-trace",
+            role="planner",
+            agent_id="planner",
+            provider="mock",
+            input_tokens=12,
+            output_tokens=8,
+            total_tokens=20,
+            duration_ms=15,
+            cost_usd=0,
+        )
+    )
+
+    traces = client.get("/traces", params={"run_id": "run-trace"})
+    summary = client.get("/traces/summary", params={"run_id": "run-trace"})
+
+    assert traces.status_code == 200
+    assert traces.json()[0]["agent_id"] == "planner"
+    assert summary.status_code == 200
+    assert summary.json()["total_tokens"] == 20
 
 
 def test_ready_reports_component_checks(client, monkeypatch):

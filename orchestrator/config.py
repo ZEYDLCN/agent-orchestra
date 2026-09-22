@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     ollama_model: str = "qwen2.5:3b"
     llm_timeout_seconds: float = 20.0
     llm_max_attempts: int = 2
+    # Optional per-million-token prices: "provider:model|input|output;...".
+    # Example: "openai:gpt-example|0.15|0.60". Kept configurable because
+    # hosted model prices change; local/mock providers are recorded as $0.
+    llm_pricing_raw: str = ""
 
     # Planner/reviewer control-plane agents. Unset values inherit the
     # primary provider/model above; local CPU inference usually needs a

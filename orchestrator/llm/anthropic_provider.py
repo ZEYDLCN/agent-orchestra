@@ -1,4 +1,4 @@
-from orchestrator.llm.base import LLMProvider
+from orchestrator.llm.base import LLMProvider, LLMResponse, TokenUsage
 
 
 class AnthropicProvider(LLMProvider):
@@ -10,11 +10,18 @@ class AnthropicProvider(LLMProvider):
         self.name = f"anthropic:{model}"
 
     def generate(self, prompt: str) -> str:
+        return self.generate_with_usage(prompt).text
+
+    def generate_with_usage(self, prompt: str) -> LLMResponse:
         response = self._client.messages.create(
             model=self._model,
             max_tokens=200,
             messages=[{"role": "user", "content": prompt}],
         )
-        return "".join(
-            block.text for block in response.content if block.type == "text"
+        return LLMResponse(
+            text="".join(block.text for block in response.content if block.type == "text"),
+            usage=TokenUsage(
+                input_tokens=int(response.usage.input_tokens or 0),
+                output_tokens=int(response.usage.output_tokens or 0),
+            ),
         )

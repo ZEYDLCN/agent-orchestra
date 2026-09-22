@@ -30,6 +30,7 @@ from orchestrator.memory import SharedMemory
 from orchestrator.messaging import MessageBus
 from orchestrator.models import WorkerInfo
 from orchestrator.queue import TaskQueue
+from orchestrator.tracing import TraceStore
 from orchestrator.worker_registry import WorkerRegistry
 from worker.executor import run_task
 
@@ -61,6 +62,7 @@ def main(worker_id: str, workdir: str):
     memory = SharedMemory(settings.redis_url)
     bus = MessageBus(settings.redis_url)
     registry = WorkerRegistry(settings.redis_url)
+    trace_store = TraceStore(settings.redis_url)
     llm = get_llm_provider()
 
     info = WorkerInfo(
@@ -106,7 +108,7 @@ def main(worker_id: str, workdir: str):
             )
             renewal_thread.start()
             try:
-                result = run_task(task, workdir_path, worker_id, llm, memory, bus)
+                result = run_task(task, workdir_path, worker_id, llm, memory, bus, trace_store)
                 if queue.ack(task.task_id, result, lease_token=task.lease_token):
                     logger.info("task done score=%s", result.get("score"), extra=log_ctx)
                 else:

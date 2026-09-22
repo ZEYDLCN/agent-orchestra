@@ -13,6 +13,7 @@ from orchestrator.messaging import MessageBus
 from orchestrator.models import AgentRun, AgentRunRequest, AgentRunStatus, Task, TaskStatus
 from orchestrator.queue import TaskQueue
 from orchestrator.redis_client import make_redis_client
+from orchestrator.tracing import TraceStore, traced_generate
 
 logger = logging.getLogger(__name__)
 
@@ -84,14 +85,28 @@ class PlannerAgent:
     def __init__(self, llm: LLMProvider):
         self.llm = llm
 
-    def plan(self, goal: str, max_tasks: int) -> dict[str, Any]:
+    def plan(
+        self,
+        goal: str,
+        max_tasks: int,
+        trace_store: TraceStore | None = None,
+        run_id: str | None = None,
+    ) -> dict[str, Any]:
         prompt = f"""You are the Planner Agent in a trading experiment system.
 Turn the user goal into at most {max_tasks} backtest tasks.
 Each task must contain positive integer fast_ma and slow_ma, with fast_ma < slow_ma.
 Return JSON only, exactly in this shape:
 {{"summary":"short plan","tasks":[{{"params":{{"fast_ma":5,"slow_ma":50}}}}]}}
 User goal: {goal}"""
-        raw = self.llm.generate(prompt)
+        response = traced_generate(
+            self.llm,
+            prompt,
+            trace_store,
+            role=self.role,
+            agent_id="planner",
+            run_id=run_id,
+        )
+        raw = response.text
         parsed = _extract_object(raw)
         tasks = _normalize_tasks(parsed.get("tasks") if parsed else None, max_tasks)
         fallback = not tasks
@@ -106,6 +121,7 @@ User goal: {goal}"""
             "tasks": tasks,
             "fallback": fallback,
             "raw_response": raw[:4000],
+            "llm_usage": response.usage.as_dict(),
         }
 
 
@@ -122,6 +138,9 @@ class ReviewerAgent:
         round_number: int,
         max_rounds: int,
         max_tasks: int,
+        trace_store: TraceStore | None = None,
+        run_id: str | None = None,
+        job_id: str | None = None,
     ) -> dict[str, Any]:
         scored = sorted(
             [task.result for task in tasks if task.status == TaskStatus.DONE and task.result],
@@ -136,7 +155,17 @@ Return JSON only:
 {{"decision":"final|refine","summary":"clear Turkish conclusion","tasks":[{{"params":{{"fast_ma":8,"slow_ma":80}}}}]}}
 User goal: {goal}
 Results: {json.dumps(scored[:8], ensure_ascii=False)}"""
-        raw = self.llm.generate(prompt)
+        response = traced_generate(
+            self.llm,
+            prompt,
+            trace_store,
+            role=self.role,
+            agent_id="reviewer",
+            run_id=run_id,
+            job_id=job_id,
+            round_number=round_number,
+        )
+        raw = response.text
         parsed = _extract_object(raw)
         decision = str(parsed.get("decision", "") if parsed else "").lower()
         proposed = _normalize_tasks(parsed.get("tasks") if parsed else None, max_tasks)
@@ -158,6 +187,7 @@ Results: {json.dumps(scored[:8], ensure_ascii=False)}"""
             "tasks": proposed,
             "fallback": fallback,
             "raw_response": raw[:4000],
+            "llm_usage": response.usage.as_dict(),
         }
 
 
@@ -175,9 +205,11 @@ class AgentWorkflow:
         self.planner = planner
         self.reviewer = reviewer
         self.client = make_redis_client(redis_url)
+        self.trace_store = TraceStore(redis_url)
 
     def rebind_client(self, client) -> None:
         self.client = client
+        self.trace_store.rebind_client(client)
 
     def start(self, request: AgentRunRequest) -> AgentRun:
         run = AgentRun(
@@ -228,7 +260,18 @@ class AgentWorkflow:
             },
         )
         for payload in payloads:
-            self.queue.push_task(Task(job_id=job_id, payload=payload))
+            self.queue.push_task(
+                Task(
+                    job_id=job_id,
+                    payload={
+                        **payload,
+                        "_trace_context": {
+                            "run_id": run.run_id,
+                            "round_number": run.current_round,
+                        },
+                    },
+                )
+            )
         return job_id
 
     def _wait_for_job(self, job_id: str, deadline: float) -> list[Task]:
@@ -248,7 +291,12 @@ class AgentWorkflow:
             return
         deadline = time.time() + settings.agent_run_timeout_seconds
         try:
-            plan = self.planner.plan(run.goal, run.max_tasks_per_round)
+            plan = self.planner.plan(
+                run.goal,
+                run.max_tasks_per_round,
+                trace_store=self.trace_store,
+                run_id=run.run_id,
+            )
             run.plan = plan
             self._save(run)
             self._event(run, "planner_completed", plan)
@@ -281,6 +329,9 @@ class AgentWorkflow:
                     round_number,
                     run.max_rounds,
                     run.max_tasks_per_round,
+                    trace_store=self.trace_store,
+                    run_id=run.run_id,
+                    job_id=job_id,
                 )
                 run.reviews.append(review)
                 self._save(run)

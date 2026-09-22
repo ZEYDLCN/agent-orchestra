@@ -50,6 +50,7 @@ zinciri ve final sonuç Redis'te kalıcı bir `AgentRun` kaydı olarak tutulur.
 - `orchestrator/mcp_server.py` — orchestrator'ı MCP tool'ları olarak dışarı açar
 - `orchestrator/auth.py`, `orchestrator/rate_limit.py` — opsiyonel API key + rate limit
 - `orchestrator/metrics.py` — Redis tabanlı iş metrikleri (`/metrics`, Prometheus formatı)
+- `orchestrator/tracing.py` — Planner, Reviewer ve trader LLM çağrıları için Redis tabanlı token/gecikme/maliyet izleri
 - `worker/` — worker process: kuyruktan görev çeker, **Docker sandbox** içinde çalıştırır, LLM'den yorum alır, sonucu yayınlar
 - `sandbox/` — task'ların çalıştığı izole Docker image'ı (ağsız, salt-okunur, non-root, kaynak limitli)
 - `target_repo_seed/` — worker worktree'lerinin bootstrap edildiği örnek "çalışma kod tabanı"; `target_repo/` ilk çalıştırmada buradan üretilir ve git-ignore'ludur
@@ -205,6 +206,19 @@ strateji sonucunun ise normal şekilde tamamlandığı test edildi.
 ### Gözlemlenebilirlik
 
 - Hem orchestrator hem worker JSON formatında, korelasyonlu (worker_id/job_id/task_id) log basar (`orchestrator/logging_setup.py`).
+- Dashboard'daki **LLM izleri** görünümü Planner, Reviewer ve her trader
+  worker'ın giriş/çıkış/toplam tokenlarını, çağrı süresini, durumunu ve agent
+  bazındaki payını aynı zaman çizelgesinde gösterir. Ollama'nın
+  `prompt_eval_count`/`eval_count`, OpenAI ve Anthropic'in provider kullanım
+  sayaçları doğrudan kaydedilir; sayaç vermeyen özel/mock sağlayıcılarda değer
+  tahmini olarak işaretlenir. Prompt ve yanıt metni trace kaydına yazılmaz.
+- `GET /traces?run_id=...` veya `?job_id=...` çağrı kayıtlarını;
+  `GET /traces/summary` aynı filtrelerle agent bazında toplu kullanımı verir.
+  Kayıtlar task verileriyle aynı TTL boyunca Redis'te tutulur.
+- Hosted model maliyeti göstermek için güncel milyon-token fiyatları örneğin
+  `ORCH_LLM_PRICING_RAW=openai:model|0.15|0.60;anthropic:model|3|15`
+  biçiminde verilebilir. Ollama ve mock çağrıları API maliyeti `$0` olarak
+  işaretlenir.
 - `GET /metrics` — Prometheus formatında: HTTP metrikleri
   (`prometheus-fastapi-instrumentator`) + iş metrikleri
   (`orchestrator_tasks_submitted_total`, `orchestrator_tasks_completed_total{status=}`,

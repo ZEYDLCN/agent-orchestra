@@ -6,7 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 
-from orchestrator.llm.base import LLMProvider
+from orchestrator.llm.base import LLMProvider, LLMResponse
 
 
 class LLMTimeoutError(RuntimeError):
@@ -28,6 +28,9 @@ class ResilientLLM(LLMProvider):
         self.name = inner.name
 
     def generate(self, prompt: str) -> str:
+        return self.generate_with_usage(prompt).text
+
+    def generate_with_usage(self, prompt: str) -> LLMResponse:
         last_exc: Exception | None = None
         for attempt in range(1, self._max_attempts + 1):
             # not a context manager on purpose: __exit__ would block until
@@ -36,7 +39,7 @@ class ResilientLLM(LLMProvider):
             # to finish (or hang) in the background instead.
             pool = ThreadPoolExecutor(max_workers=1)
             try:
-                future = pool.submit(self._inner.generate, prompt)
+                future = pool.submit(self._inner.generate_with_usage, prompt)
                 return future.result(timeout=self._timeout)
             except FutureTimeoutError:
                 last_exc = LLMTimeoutError(f"LLM call timed out after {self._timeout}s")

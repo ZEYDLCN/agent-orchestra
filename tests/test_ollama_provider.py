@@ -41,6 +41,30 @@ def test_name_includes_model_for_heterogeneous_visibility():
     assert provider.name == "ollama:qwen2.5:3b"
 
 
+def test_generate_with_usage_returns_ollama_token_counters(monkeypatch):
+    monkeypatch.setattr(
+        requests,
+        "post",
+        lambda *args, **kwargs: FakeResponse(
+            {
+                "response": "yanit",
+                "prompt_eval_count": 21,
+                "eval_count": 7,
+                "eval_duration": 1234,
+            }
+        ),
+    )
+
+    response = OllamaProvider("http://localhost:11434", "qwen2.5:3b").generate_with_usage("prompt")
+
+    assert response.text == "yanit"
+    assert response.usage.input_tokens == 21
+    assert response.usage.output_tokens == 7
+    assert response.usage.total_tokens == 28
+    assert response.usage.estimated is False
+    assert response.usage.metadata["eval_duration"] == 1234
+
+
 def test_trailing_slash_in_base_url_is_normalized(monkeypatch):
     captured = {}
 

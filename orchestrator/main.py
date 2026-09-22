@@ -21,6 +21,7 @@ from orchestrator.models import (
     AgentRunRequest,
     JobSubmitRequest,
     JobSubmitResponse,
+    LLMTrace,
     ScaleRequest,
     Task,
     TaskStatus,
@@ -229,6 +230,40 @@ def agent_run_events(run_id: str):
         event_stream(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/traces", response_model=list[LLMTrace])
+def list_traces(
+    run_id: str | None = None,
+    job_id: str | None = None,
+    agent_id: str | None = None,
+    role: str | None = None,
+    limit: int = Query(default=100, ge=1, le=200),
+):
+    """Recent LLM calls, scoped to an agent run, job, role, or agent."""
+    return agent_workflow.trace_store.list_recent(
+        run_id=run_id,
+        job_id=job_id,
+        agent_id=agent_id,
+        role=role,
+        limit=limit,
+    )
+
+
+@app.get("/traces/summary")
+def trace_summary(
+    run_id: str | None = None,
+    job_id: str | None = None,
+    agent_id: str | None = None,
+    role: str | None = None,
+):
+    """Aggregated token, latency, cost, and error totals per agent."""
+    return agent_workflow.trace_store.summary(
+        run_id=run_id,
+        job_id=job_id,
+        agent_id=agent_id,
+        role=role,
     )
 
 
