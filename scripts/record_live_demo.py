@@ -1,8 +1,5 @@
-"""Record a two-minute, captioned demo against a running real orchestrator.
+"""Record a two-minute Turkish product demo against the real dashboard/API."""
 
-The script drives the actual dashboard and API. It does not mock requests.
-Output defaults to workspace/demo/agent-orchestra-live-demo.webm.
-"""
 import argparse
 import shutil
 import time
@@ -20,23 +17,24 @@ def add_demo_overlay(page: Page) -> None:
           const style = document.createElement('style');
           style.textContent = `
             #demo-caption {
-              position: fixed; left: 50%; bottom: 30px; transform: translateX(-50%);
-              z-index: 2147483647; max-width: 1040px; padding: 15px 24px;
-              border: 1px solid rgba(255,255,255,.35); border-radius: 16px;
-              color: white; background: rgba(19,20,30,.88);
+              position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
+              z-index: 2147483647; width: min(980px, calc(100vw - 80px));
+              padding: 14px 24px; border: 1px solid rgba(255,255,255,.38);
+              border-radius: 16px; color: white; background: rgba(22,20,31,.88);
               box-shadow: 0 14px 40px rgba(25,15,45,.28);
-              font: 600 20px/1.35 Inter, system-ui, sans-serif;
+              font: 600 19px/1.35 Inter, system-ui, sans-serif;
               text-align: center; backdrop-filter: blur(12px);
               transition: opacity .35s ease, transform .35s ease;
             }
-            #demo-caption:empty { opacity: 0; transform: translate(-50%,12px); }
             #demo-brand {
               position: fixed; right: 28px; top: 22px; z-index: 2147483647;
-              padding: 8px 13px; border-radius: 999px; color: #3f3950;
-              background: rgba(255,255,255,.86); border: 1px solid rgba(98,74,135,.16);
+              padding: 9px 14px; border-radius: 999px; color: #3f3950;
+              background: rgba(255,255,255,.9); border: 1px solid rgba(98,74,135,.18);
               font: 700 12px/1 Inter, system-ui, sans-serif; letter-spacing: .04em;
               backdrop-filter: blur(10px);
             }
+            #demo-focus { position: fixed; inset: 0; pointer-events: none; z-index: 2147483646;
+              box-shadow: inset 0 0 90px rgba(113,78,174,.08); }
           `;
           document.head.appendChild(style);
           const caption = document.createElement('div');
@@ -45,8 +43,11 @@ def add_demo_overlay(page: Page) -> None:
           document.body.appendChild(caption);
           const brand = document.createElement('div');
           brand.id = 'demo-brand';
-          brand.textContent = 'AGENT ORCHESTRA · LIVE DEMO';
+          brand.textContent = 'AGENT ORCHESTRA · CANLI DEMO';
           document.body.appendChild(brand);
+          const focus = document.createElement('div');
+          focus.id = 'demo-focus';
+          document.body.appendChild(focus);
         }"""
     )
 
@@ -75,72 +76,69 @@ def record(base_url: str, output: Path, duration: int) -> None:
             accept_downloads=True,
         )
         page = context.new_page()
-        response = page.goto(f"{base_url}/dashboard", wait_until="networkidle")
+        response = page.goto(f"{base_url}/dashboard", wait_until="domcontentloaded")
         assert response is not None and response.status == 200
-        expect(page.locator("#connectionText")).to_have_text("Bağlı")
+        expect(page.locator("#connectionText")).to_have_text("Bağlı", timeout=15_000)
         add_demo_overlay(page)
         video = page.video
         assert video is not None
         started = time.monotonic()
 
-        caption(page, "Agent Orchestra: dağıtık agent çalışmalarını tek merkezden yönetin.")
-        wait_until(started, 7)
+        caption(page, "Tek hedef · Planner · Trader agent’lar · Reviewer · Denetlenmiş final")
+        expect(page.locator("#agentRunPanel")).to_be_visible(timeout=15_000)
+        wait_until(started, 12)
 
-        caption(page, "Worker kümesi · İzole Git worktree · Docker sandbox")
+        caption(page, "Planner doğal dildeki hedefi doğrulanmış görevlere dönüştürür.")
+        page.locator("#newAgentRunButton").click()
+        page.locator("#agentGoal").fill(
+            "En iyi hareketli ortalama stratejisini bul; gerekiyorsa ikinci turda aramayı daralt."
+        )
+        wait_until(started, 27)
+
+        caption(page, "Tur, görev ve trader sınırları kullanıcı tarafından kontrol edilir.")
+        page.locator("#agentRunDialog [data-close-dialog]").first.click()
         page.locator(".insights-panel [data-open-workers]").click()
-        page.locator("#scaleInput").fill("3")
+        page.locator("#scaleInput").fill("1")
         page.locator("#scaleButton").click()
-        expect(page.locator("#workersList .worker-row")).to_have_count(3, timeout=30_000)
-        wait_until(started, 20)
+        expect(page.locator("#workersList .worker-row")).to_have_count(1, timeout=30_000)
+        wait_until(started, 40)
 
+        caption(page, "Her trader ayrı süreç, profil ve model bilgisiyle izlenir.")
         page.locator("#workersDialog [data-close-dialog]").click()
-        caption(page, "3 × 3 parametre grid’i: dokuz görev otomatik dağıtılıyor.")
         page.locator(".page-heading [data-new-job]").click()
-        page.locator("#fastParams").fill("5, 10, 20")
-        page.locator("#slowParams").fill("50, 100, 200")
-        expect(page.locator("#gridSummary")).to_contain_text("9 görev")
-        wait_until(started, 31)
+        page.locator("#fastParams").fill("5, 10")
+        page.locator("#slowParams").fill("50")
+        expect(page.locator("#gridSummary")).to_contain_text("2 görev")
+        wait_until(started, 51)
+
+        caption(page, "İki gerçek backtest görevi dayanıklı Redis kuyruğuna gönderiliyor.")
         page.locator("#submitJobButton").click()
         expect(page.locator("#newJobDialog")).not_to_be_visible(timeout=20_000)
+        expect(page.locator("#jobDone")).to_have_text("2", timeout=35_000)
+        wait_until(started, 65)
 
-        caption(page, "Canlı ilerleme · Redis lease · Hata durumunda otomatik geri kazanım")
-        wait_until(started, 43)
-        expect(page.locator("#jobDone")).to_have_text("9", timeout=45_000)
-        caption(page, "Dokuz görevin tamamı sonuçlandı; en iyi skor otomatik öne çıkarıldı.")
-        wait_until(started, 55)
-
+        caption(page, "İlerleme, skorlar ve agent yorumları arayüze canlı olarak gelir.")
         page.locator(".view-tab[data-view=results]").click()
-        caption(page, "Sonuçları skor veya çalışma süresine göre karşılaştırın.")
-        expect(page.locator("#allResults .result-row")).to_have_count(9)
-        page.locator("#resultSort").select_option("duration")
-        wait_until(started, 66)
-
-        page.locator("#allResults .result-row").first.click()
-        caption(page, "Her sonuçta worker, süre, parametreler ve agent yorumu birlikte görünür.")
-        expect(page.locator("#resultDialog")).to_be_visible()
+        expect(page.locator("#allResults .result-row")).to_have_count(2)
         wait_until(started, 76)
-        page.locator("#resultDialog [data-close-dialog]").click()
 
+        caption(page, "Her sonuçta worker, model, parametre, süre ve değerlendirme birlikte görünür.")
+        page.locator("#allResults .result-row").first.click()
+        expect(page.locator("#resultDialog")).to_be_visible()
+        wait_until(started, 88)
+
+        page.locator("#resultDialog [data-close-dialog]").click()
         page.locator(".view-tab[data-view=activity]").click()
-        caption(page, "Aktivite akışı görev geçmişini ve deneme sayılarını izlenebilir kılar.")
-        wait_until(started, 86)
+        caption(page, "Aktivite akışı her görevin yaşam döngüsünü denetlenebilir kılar.")
+        wait_until(started, 99)
 
         page.locator(".view-tab[data-view=overview]").click()
-        caption(page, "Refinement: en iyi sonuçlar yeni ve daha dar bir taramaya dönüşür.")
-        page.locator("#refineJobButton").click()
-        expect(page.locator("#totalTasks")).to_have_text("18 görev", timeout=20_000)
-        wait_until(started, 99)
-        expect(page.locator("#jobDone")).to_have_text("18", timeout=45_000)
+        caption(page, "Reviewer sonuçları bitirir veya otomatik refine turu başlatır.")
+        page.locator("#agentRunPanel").scroll_into_view_if_needed()
+        wait_until(started, 110)
 
-        caption(page, "CSV/JSON dışa aktarın, işi tekrarlayın veya şablon olarak saklayın.")
-        with page.expect_download():
-            page.locator("#exportJsonButton").click()
-        wait_until(started, 109)
-
-        caption(page, "Dayanıklı kuyruk, güvenli sandbox ve gözlemlenebilir agent orkestrasyonu.")
+        caption(page, "Agent Orchestra · Fikirden plana, paralel çalışmadan güvenilir finale.")
         page.locator("#themeButton").click()
-        wait_until(started, duration - 3)
-        caption(page, "Agent Orchestra · Fikirden sonuca, birlikte.")
         wait_until(started, duration)
 
         page.close()

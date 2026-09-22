@@ -1,63 +1,58 @@
-# Agent Orchestra — 2 dakikalık canlı demo
+# Agent Orchestra — 2 dakikalık Türkçe tanıtım videosu
 
-Bu akış, sistemi çalışan ürün olarak iki dakikada gösterir. Anlatım metni
+Video gerçek dashboard ve API üzerinde kaydedilir. Planner → trader agent'lar →
+Reviewer döngüsü, worker yönetimi, gerçek backtest görevleri, sonuçlar ve
+aktivite akışı gösterilir. Türkçe anlatım metni
 [`scripts/demo_narration_tr.txt`](scripts/demo_narration_tr.txt) dosyasındadır.
 
 ## Hazırlık
 
 ```powershell
-docker compose up -d redis
-docker build -t agent-orchestrator-sandbox:latest ./sandbox
-uvicorn orchestrator.main:app --reload
+docker compose --profile local-llm up -d redis ollama
+uvicorn orchestrator.main:app --host 127.0.0.1 --port 8000
 ```
 
-Tarayıcıda `http://127.0.0.1:8000/dashboard` adresini açın. Demo öncesinde:
+Piper'ın açık kaynak Türkçe DFKI modelini bir kez indirin:
 
-1. Worker kümesini `3` yapın.
-2. Yeni iş formundaki değerleri `fast: 5, 10, 20` ve
-   `slow: 50, 100, 200` olarak bırakın.
-3. Pencereyi 1440×900 civarında, Genel Bakış sekmesi açık tutun.
-4. Sesli anlatım kullanılıyorsa bunun yapay zekâ tarafından üretildiğini
-   dinleyiciye açıkça belirtin. Hazır metin bu açıklamayla başlar.
+```powershell
+python -m piper.download_voices tr_TR-dfki-medium --download-dir workspace/demo/piper
+```
+
+## Videoyu üretme
+
+```powershell
+python scripts/build_demo_video.py
+```
+
+Betik üç adımı otomatik tamamlar:
+
+1. 241 kelimelik Türkçe anlatımı yerel Piper modeliyle tamamen offline üretir.
+2. Playwright ile 1440×900 çözünürlükte, gerçek API üzerinde 120 saniyelik
+   dashboard kaydı alır.
+3. Sesi EBU uyumlu seviyeye normalize eder ve H.264/AAC MP4 içine ekler.
+
+Nihai çıktı:
+
+```text
+workspace/demo/agent-orchestra-tanitim-tr.mp4
+```
+
+Ara çıktılar `agent-orchestra-demo-tr.wav` ve
+`agent-orchestra-live-demo.webm` olarak aynı klasörde tutulur.
 
 ## Zaman çizelgesi
 
 | Süre | Ekrandaki hareket | Anlatılan nokta |
 |---|---|---|
-| 00:00–00:15 | Dashboard genel görünümü | Tek merkezden iş, worker ve sonuç yönetimi |
-| 00:15–00:30 | Worker yönetimini açın; üç worker ve heartbeat bilgilerini gösterin | İzole worktree ve Docker sandbox |
-| 00:30–00:50 | Yeni iş oluşturun; 3×3 grid özetini gösterip gönderin | Dokuz görevin otomatik dağıtılması |
-| 00:50–01:10 | Canlı ilerlemeyi, aktiviteyi ve worker görevlerini gösterin | Redis lease, retry ve crash recovery |
-| 01:10–01:30 | En iyi sonuçları ve Agent Insights kartını gösterin | Skor sıralaması ve LLM yorumu |
-| 01:30–01:45 | Daraltılmış tarama düğmesine basın | En iyi sonuçların yeni işe dönüşmesi |
-| 01:45–01:55 | CSV/JSON indirme ve tekrar çalıştırma ikonlarını gösterin | Sonuçların tekrar kullanılabilmesi |
-| 01:55–02:00 | Sistem hazır rozeti ve çalışan worker’larla kapanış | Dayanıklı, gözlemlenebilir orkestrasyon |
+| 00:00–00:12 | Tamamlanmış Qwen agent akışı | Planner, trader ve Reviewer mimarisi |
+| 00:12–00:27 | AI hedefi ver formu | Doğal dil hedefi ve kontrol sınırları |
+| 00:27–00:40 | Worker yönetimi | Ayrı süreç, profil ve model görünürlüğü |
+| 00:40–01:05 | İki gerçek backtest görevi | Redis kuyruğu ve canlı ilerleme |
+| 01:05–01:28 | Sonuçlar ve detay penceresi | Skor, parametre, model ve agent yorumu |
+| 01:28–01:39 | Aktivite akışı | Görev yaşam döngüsü ve denetlenebilirlik |
+| 01:39–01:50 | Agent final paneli | Reviewer ve otomatik refine kararı |
+| 01:50–02:00 | Koyu tema kapanışı | Ürün özeti |
 
-## Türkçe ses dosyası
-
-OpenAI anahtarı `OPENAI_API_KEY` veya `ORCH_OPENAI_API_KEY` içinde tanımlıysa:
-
-```powershell
-python scripts/generate_demo_voice.py
-```
-
-Çıktı `workspace/demo/agent-orchestra-demo-tr.mp3` olur. Varsayılan model
-`gpt-4o-mini-tts`, ses `marin`’dir. Metni ve seçilen ayarları API çağrısı
-yapmadan kontrol etmek için:
-
-```powershell
-python scripts/generate_demo_voice.py --dry-run
-```
-
-## Canlı demo videosu
-
-Dashboard ve worker'lar çalışırken aşağıdaki komut gerçek API'yi kullanarak
-1440×900 çözünürlükte, yaklaşık iki dakikalık altyazılı bir demo kaydeder:
-
-```powershell
-python scripts/record_live_demo.py
-```
-
-Çıktı `workspace/demo/agent-orchestra-live-demo.webm` olur. Betik istekleri
-mock'lamaz; worker ölçekleme, 3×3 görev grid'i, sonuç ekranı, aktivite akışı,
-refinement ve JSON dışa aktarma adımlarını canlı sistem üzerinde yürütür.
+Anlatımın ilk cümlesi sesin yapay zekâ ile üretildiğini açıkça belirtir.
+Piper üretimi yereldir; anlatım metni herhangi bir harici TTS servisine
+gönderilmez.

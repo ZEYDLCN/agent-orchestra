@@ -54,7 +54,8 @@ zinciri ve final sonuç Redis'te kalıcı bir `AgentRun` kaydı olarak tutulur.
 - `sandbox/` — task'ların çalıştığı izole Docker image'ı (ağsız, salt-okunur, non-root, kaynak limitli)
 - `target_repo_seed/` — worker worktree'lerinin bootstrap edildiği örnek "çalışma kod tabanı"; `target_repo/` ilk çalıştırmada buradan üretilir ve git-ignore'ludur
 - `scripts/demo.py`, `scripts/listen.py`, `scripts/check_dashboard.py` — CLI demo client, canlı mesaj izleyici, dashboard UI kontrolü
-- `scripts/generate_demo_voice.py` — iki dakikalık Türkçe demo anlatımını OpenAI TTS ile MP3'e çevirir
+- `scripts/build_demo_video.py` — anlatımı yerel Piper Türkçe neural sesiyle üretir, gerçek dashboard kaydını alır ve 120 saniyelik MP4 oluşturur
+- `scripts/generate_demo_voice.py` — API anahtarı varsa OpenAI TTS ile alternatif MP3 anlatım üretir
 
 ### Görev dayanıklılığı (durable queue)
 

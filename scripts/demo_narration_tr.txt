@@ -1,16 +1,17 @@
 Dinlediğiniz anlatım yapay zekâ tarafından oluşturulmuştur.
 
-Agent Orchestra, bir işi bağımsız agent'lara dağıtan, sonuçları canlı izleyen ve en iyi çıktıyı yeni bir çalışmaya dönüştüren dayanıklı bir orkestrasyon platformu.
+Karşınızda Agent Orchestra. Tek bir hedefi, birlikte çalışan uzman agent’lara dönüştüren açık ve izlenebilir bir orkestrasyon çalışma alanı.
 
-Ana ekranda iş geçmişini, aktif worker'ları ve sistem durumunu tek bakışta görüyoruz. Worker panelini açtığımda üç ayrı sürecin kendi Git worktree'sinde çalıştığını, yeteneklerini ve son heartbeat zamanlarını izleyebiliyorum. Her strateji görevi ağ erişimi kapalı, salt okunur ve kaynakları sınırlı bir Docker sandbox içinde yürütülüyor.
+Akış kullanıcı hedefiyle başlıyor. Planner Agent, doğal dille yazılan isteği analiz ediyor ve doğrulanmış görevlere ayırıyor. Orchestrator bu görevleri Redis tabanlı dayanıklı kuyruğa gönderiyor. Trader agent’lar işleri paralel biçimde alırken sonuçlar ortak hafızaya ve mesaj akışına yazılıyor.
 
-Şimdi üç hızlı ve üç yavaş hareketli ortalama değeri seçiyorum. Sistem dokuz kombinasyon oluşturuyor ve görevleri worker kümesine dağıtıyor. İlerleme yüzdesi, tamamlanan işler ve anlık aktivite ekrana canlı geliyor.
+Burada AI hedefi ver ekranından amacı, en fazla tur sayısını, tur başına görev miktarını ve trader sayısını belirleyebiliyoruz. Planner ve Reviewer için yerel Qwen ya da farklı bir LLM seçilebiliyor.
 
-Arka planda Redis tabanlı lease mekanizması görev kaybını önlüyor. Bir worker beklenmedik biçimde kapanırsa lider reaper süresi dolan görevi geri alıyor; başka bir worker kaldığı yerden devam ediyor. Lease token koruması, geç gelen eski bir sonucun güncel sonucu ezmesini engelliyor.
+Worker panelinde her agent’ın ayrı bir süreçte, kendi Git worktree’sinde çalıştığını görüyoruz. Profil ve model bilgileri açıkça izleniyor. Şimdi iki gerçek backtest görevi oluşturuyorum. Görevler worker’a dağıtılıyor; ilerleme ve sonuçlar arayüze canlı geliyor.
 
-Çalışma tamamlandığında sonuçlar skora göre sıralanıyor. Agent Insights kartı en iyi kombinasyonu ve model yorumunu öne çıkarıyor. Sonucu ayrıntılı inceleyebilir, CSV veya JSON olarak indirebilir ve aynı işi tek tıkla yeniden çalıştırabiliriz.
+Arka planda lease, retry ve dead-letter mekanizmaları görev kaybını önlüyor. Bir worker kapanırsa süresi dolan görev başka bir worker tarafından devralınabiliyor. Shared memory ise önceki sonuçları yeni agent yorumlarına bağlayarak aynı bilginin tekrar tekrar üretilmesini azaltıyor.
 
-Daraltılmış tarama özelliği en iyi sonuçları yeni bir deneyin girdisine çeviriyor. Böylece sistem yalnızca paralel görev çalıştırmıyor; çıktıyı bir sonraki karara bağlayan gerçek bir agent döngüsü kuruyor.
+Sonuç ekranında skorları, çalışma süresini, kullanılan modeli ve agent yorumunu birlikte karşılaştırabiliyoruz. Aktivite akışı hangi görevin, hangi worker tarafından, kaçıncı denemede tamamlandığını gösteriyor.
 
-API anahtarı desteği, metrikler, health ve readiness kontrolleriyle Agent Orchestra; yerel demodan güvenli ve gözlemlenebilir üretim mimarisine uzanan sağlam bir temel sunuyor.
+Trader sonuçları bittiğinde Reviewer Agent hedefe göre karar veriyor. Sonuç yeterliyse final üretiyor; geliştirme payı varsa yeni parametrelerle otomatik refine turu başlatıyor. Final seçim bütün turları karşılaştırarak gerçekten en iyi sonucu koruyor.
 
+API, canlı olay akışı, metrikler, readiness kontrolleri ve dışa aktarma araçlarıyla Agent Orchestra; fikirden plana, paralel çalışmadan denetlenmiş sonuca kadar bütün agent döngüsünü tek yerde birleştiriyor.
