@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = 20.0
     llm_max_attempts: int = 2
 
+    # Planner/reviewer control-plane agents. Unset values inherit the
+    # primary provider/model above; local CPU inference usually needs a
+    # larger llm_timeout_seconds than hosted providers.
+    control_llm_provider: str | None = None
+    control_llm_model: str | None = None
+    agent_run_timeout_seconds: int = 15 * 60
+    agent_run_poll_interval_seconds: float = 0.5
+
     # Heterogeneous agent pool: "name|provider|model" entries separated by
     # ";", e.g. "qwen|ollama|qwen2.5:3b;claude|anthropic|claude-sonnet-5".
     # When set, POST /workers/scale cycles new workers across these

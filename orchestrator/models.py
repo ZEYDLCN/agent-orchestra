@@ -77,6 +77,40 @@ class AgentProfile(BaseModel):
     model: str | None = None
 
 
+class AgentRunStatus(str, Enum):
+    PLANNING = "planning"
+    RUNNING = "running"
+    REVIEWING = "reviewing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class AgentRunRequest(BaseModel):
+    goal: str = Field(min_length=3, max_length=2000)
+    max_rounds: int = Field(default=2, ge=1, le=3)
+    max_tasks_per_round: int = Field(default=9, ge=1, le=50)
+    trader_count: int = Field(default=3, ge=1, le=10)
+
+
+class AgentRun(BaseModel):
+    run_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    goal: str
+    status: AgentRunStatus = AgentRunStatus.PLANNING
+    stage: str = "planner"
+    max_rounds: int = 2
+    max_tasks_per_round: int = 9
+    trader_count: int = 3
+    current_round: int = 0
+    current_job_id: str | None = None
+    job_ids: list[str] = Field(default_factory=list)
+    plan: dict[str, Any] | None = None
+    reviews: list[dict[str, Any]] = Field(default_factory=list)
+    final_result: dict[str, Any] | None = None
+    error: str | None = None
+    created_at: float = Field(default_factory=time.time)
+    updated_at: float = Field(default_factory=time.time)
+
+
 class JobMeta(BaseModel):
     job_id: str
     created_at: float = Field(default_factory=time.time)

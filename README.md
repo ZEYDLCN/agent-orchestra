@@ -19,18 +19,30 @@ TTS üretim komutu: [`DEMO_TR.md`](DEMO_TR.md).
 ## Mimari
 
 ```
-FastAPI orchestrator --push--> Redis (durable queue + registry) --pop--> Worker process
-        |                          |                     |                    |
-        |                    pub/sub events        job history/metrics   sandbox container
-        |                          |                                          |
-        +--> git worktree per worker                                   LLM + shared memory
+User goal
+   ↓
+Planner Agent (LLM) → Orchestrator → Redis durable queue / message bus
+                                      ↓       ↓       ↓
+                                   Trader A Trader B Trader C
+                                      └──── shared memory ────┘
+                                                ↓
+                                      Reviewer Agent (LLM)
+                                                ↓
+                                  final result veya yeni/refine turu
 ```
+
+`POST /agent-runs` bu döngüyü tek istekle başlatır. Planner serbest metin
+hedefi doğrulanan backtest görevlerine çevirir; orchestrator görevleri trader
+worker'lara dağıtır; Reviewer sonuçları hedefe göre değerlendirip bitirir veya
+en fazla üç tura kadar yeni görevler üretir. Plan, her review kararı, job
+zinciri ve final sonuç Redis'te kalıcı bir `AgentRun` kaydı olarak tutulur.
 
 - `orchestrator/` — FastAPI servisi: iş kabul eder, worker spawn/scale eder, sonuç toplar
 - `orchestrator/queue.py` — Redis tabanlı, **lease/retry/dead-letter destekli** dayanıklı task kuyruğu
 - `orchestrator/reaper.py` — kilitli kalan (worker çökmüş/öldürülmüş) task'ları geri kazanan arka plan süreci
 - `orchestrator/worker_registry.py` — Redis tabanlı worker kaydı: heartbeat/TTL, cooperative durdurma
 - `orchestrator/coordinator.py` — tamamlanan bir job'ın en iyi sonuçlarından yeni, daha dar bir parametre taraması üretir
+- `orchestrator/workflow.py` — LLM Planner → trader worker'lar → LLM Reviewer döngüsünü çalıştırır; Reviewer gerekirse otomatik refine turu açar
 - `orchestrator/messaging.py` — inter-agent pub/sub (worker'lar sonuçlarını yayınlar, geç bağlananlar için replay)
 - `orchestrator/memory.py` — shared memory + RAG-lite (parametre-uzayı benzerliğine göre geçmiş sonuç getirme)
 - `orchestrator/llm/` — multi-LLM soyutlaması: `mock` (varsayılan, key gerektirmez), `anthropic`, `openai`, `ollama` (local model); timeout+retry sarmalayıcılı
@@ -102,6 +114,34 @@ deterministik bir "en iyi sonuca yakınlaş" sezgisiğine dayanır: sayısal
 bir hedefi (skor) olan bu görev tipi için LLM'in serbest metin
 üretip geri parse etmesinden daha güvenilir ve test edilebilir. Yeni
 job `parent_job_id` ile eskisine bağlanır (`GET /jobs/{id}` → `meta`).
+
+### Hedeften sonuca LLM agent akışı
+
+Dashboard'daki **AI hedefi ver** düğmesi veya aşağıdaki API çağrısı tam agent
+döngüsünü başlatır:
+
+```powershell
+$body = @{
+  goal = "En iyi hareketli ortalama stratejisini bul ve gerekiyorsa ikinci turda daralt"
+  max_rounds = 2
+  max_tasks_per_round = 4
+  trader_count = 3
+} | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri http://localhost:8000/agent-runs -ContentType application/json -Body $body
+```
+
+- `GET /agent-runs` — son akışları listeler.
+- `GET /agent-runs/{run_id}` — Planner planını, job/tur zincirini, Reviewer kararlarını ve final sonucu verir.
+- `GET /agent-runs/{run_id}/events` — Planner, trader turu, Reviewer ve final olaylarını SSE ile yayınlar.
+
+Planner ve Reviewer varsayılan olarak `ORCH_LLM_PROVIDER` ayarını kullanır.
+Rolleri ayrı bir modele bağlamak için `ORCH_CONTROL_LLM_PROVIDER` ve
+`ORCH_CONTROL_LLM_MODEL` ayarlanabilir. Örneğin yerel Qwen için:
+
+```text
+ORCH_CONTROL_LLM_PROVIDER=ollama
+ORCH_CONTROL_LLM_MODEL=qwen2.5:3b
+```
 
 ### Multi-LLM
 

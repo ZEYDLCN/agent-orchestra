@@ -438,6 +438,24 @@ h1 {
   margin-top:7px;
 }
 
+.page-heading-actions {
+  display:flex;
+  align-items:center;
+  gap:9px;
+  flex-shrink:0;
+}
+
+.agent-goal-button {
+  color:#6d4ec4;
+  border-color:#ddd4f6;
+  background:linear-gradient(135deg,#fff 25%,#f8f1ff);
+}
+
+.agent-goal-button:hover {
+  border-color:#bba9eb;
+  background:#f5edff;
+}
+
 .button {
   display:inline-flex;
   align-items:center;
@@ -1045,6 +1063,85 @@ h1 {
   background:#edf7f1;
   color:#4e8a6c;
   border-color:#e1eee5;
+}
+
+.agent-run-panel {
+  position:relative;
+  overflow:hidden;
+  margin:-10px 0 24px;
+  padding:14px;
+  border:1px solid #e3d8f7;
+  border-radius:12px;
+  background:linear-gradient(135deg,#fff 15%,#fbf4ff 58%,#f2fbfa);
+  box-shadow:0 8px 24px #6653920a;
+}
+
+.agent-run-panel::after {
+  content:"✦";
+  position:absolute;
+  right:13px;
+  top:8px;
+  color:#c683e7;
+  font-size:19px;
+}
+
+.agent-run-heading,.agent-run-meta {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+.agent-run-heading {
+  padding-right:25px;
+}
+
+.agent-run-heading strong {
+  font-size:12px;
+}
+
+.agent-run-stage {
+  padding:2px 7px;
+  border-radius:999px;
+  color:#6947b5;
+  background:#eee7ff;
+  font-size:9px;
+  font-weight:700;
+  letter-spacing:.35px;
+  text-transform:uppercase;
+}
+
+.agent-run-panel p {
+  margin:8px 0 0;
+  color:var(--text);
+  font-size:11px;
+  line-height:1.55;
+}
+
+.agent-run-panel .agent-run-summary {
+  color:var(--muted);
+}
+
+.agent-run-meta {
+  margin-top:10px;
+  color:var(--muted);
+  font-size:10px;
+}
+
+.agent-run-meta span {
+  display:flex;
+  align-items:center;
+  gap:4px;
+}
+
+.agent-run-panel.completed {
+  border-color:#dcece2;
+  background:linear-gradient(135deg,#fff,#eff9f3);
+}
+
+.agent-run-panel.failed {
+  border-color:#f3d6dc;
+  background:#fff5f6;
 }
 
 .section-heading {
@@ -1720,6 +1817,23 @@ dialog::backdrop {
   padding:10px 12px;
 }
 
+.agent-goal-input {
+  min-height:98px;
+  resize:vertical;
+  line-height:1.5;
+  font-family:inherit;
+}
+
+.agent-run-fields {
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:10px;
+}
+
+.agent-run-fields .form-label {
+  display:block;
+}
+
 .form-hint {
   font-size:11px;
   line-height:1.8;
@@ -2216,6 +2330,20 @@ dialog::backdrop {
 @media(max-width:760px) {
   body {
     padding:12px 8px;
+  }
+  .page-heading {
+    align-items:flex-start;
+    flex-direction:column;
+  }
+  .page-heading-actions {
+    width:100%;
+  }
+  .page-heading-actions .button {
+    flex:1;
+    justify-content:center;
+  }
+  .agent-run-fields {
+    grid-template-columns:1fr;
   }
   .app-shell {
     border-radius:19px;

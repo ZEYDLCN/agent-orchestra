@@ -19,6 +19,7 @@ def main(base_url: str):
     workers: list[dict] = []
     jobs: list[dict] = []
     submissions: list[dict] = []
+    agent_runs: list[dict] = []
     failures: list[str] = []
     details: dict[str, dict] = {}
     offline = False
@@ -36,7 +37,28 @@ def main(base_url: str):
         if path.startswith('/jobs') and offline:
             route.fulfill(status=503, json={"detail": "Test connection unavailable"})
             return
-        if path == '/workers/scale':
+        if path == '/agent-runs' and method == 'POST':
+            payload = route.request.post_data_json
+            current_job_id = jobs[0]['job_id'] if jobs else None
+            run = {"run_id": f"run-{len(agent_runs)+1:04d}", "goal": payload['goal'],
+                   "status": "completed", "stage": "final",
+                   "max_rounds": payload['max_rounds'],
+                   "max_tasks_per_round": payload['max_tasks_per_round'],
+                   "trader_count": payload['trader_count'], "current_round": 1,
+                   "current_job_id": current_job_id,
+                   "job_ids": [current_job_id] if current_job_id else [],
+                   "plan": {"provider": "ollama:qwen2.5:3b", "summary": "Hedef için aday parametreler planlandı.", "tasks": []},
+                   "reviews": [{"provider": "ollama:qwen2.5:3b", "decision": "final", "summary": "Reviewer en iyi sonucu seçti."}],
+                   "final_result": {"summary": "Reviewer en iyi sonucu seçti.", "best_result": {"score": 94.8}, "rounds": 1},
+                   "error": None, "created_at": now, "updated_at": now}
+            agent_runs.insert(0, run)
+            body = run
+        elif path.startswith('/agent-runs?'):
+            body = agent_runs[:1]
+        elif path.startswith('/agent-runs/'):
+            run_id = path.rsplit('/', 1)[-1]
+            body = next(run for run in agent_runs if run['run_id'] == run_id)
+        elif path == '/workers/scale':
             count = route.request.post_data_json['count']
             for index in range(len(workers), count):
                 workers.append({"worker_id": f"worker-{index+1:08d}", "pid": 4800 + index,
@@ -159,6 +181,13 @@ def main(base_url: str):
         expect(page.locator('#topResults .result-row')).to_have_count(3)
         expect(page.locator('#progressPercent')).to_have_text('100%')
         expect(page.locator('#insightProvider')).to_contain_text('Mock sağlayıcı')
+        page.locator('#newAgentRunButton').click()
+        page.locator('#agentGoal').fill('En iyi hareketli ortalama parametrelerini bul ve sonucu değerlendir.')
+        page.locator('#agentMaxTasks').fill('2')
+        page.locator('#startAgentRunButton').click()
+        expect(page.locator('#agentRunPanel')).to_be_visible()
+        expect(page.locator('#agentRunPanel')).to_contain_text('Agent akışı tamamlandı')
+        expect(page.locator('#agentRunPanel')).to_contain_text('ollama:qwen2.5:3b')
         page.screenshot(path=str(output / 'desktop-results.png'), full_page=True)
 
         page.locator('.view-tab[data-view=results]').click()

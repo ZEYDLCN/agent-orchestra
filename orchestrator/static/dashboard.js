@@ -38,7 +38,7 @@ const icon = name => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">$
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const number = (value, digits = 2) => Number.isFinite(Number(value)) ? Number(value).toLocaleString('tr-TR', {maximumFractionDigits:digits}) : '—';
 const time = value => value ? new Date(value * 1000).toLocaleString('tr-TR', {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : '—';
-const state = {jobs:[], workers:[], job:null, jobId:null, filter:'all', search:'', view:'overview', source:null, reviewed:new Set(), errors:{}, loaded:false};
+const state = {jobs:[], workers:[], job:null, jobId:null, agentRun:null, agentRunId:null, agentRunNotified:null, filter:'all', search:'', view:'overview', source:null, reviewed:new Set(), errors:{}, loaded:false};
 const DAILY_TASK_BUDGET = 500;
 let refreshBusy = false;
 let detailRequest = null;
@@ -191,6 +191,26 @@ function renderChecklist() {
     $(id).querySelector('.check-box').innerHTML = done ? icon('check') : '';
   }
 }
+function renderAgentRun() {
+  const panel = $('agentRunPanel');
+  const run = state.agentRun;
+  panel.hidden = !run;
+  if (!run) return;
+  const labels = {
+    planning:'Planner hedefi görevlere çeviriyor',
+    running:`Trader agent’lar ${run.current_round || 1}. turu çalışıyor`,
+    reviewing:`Reviewer ${run.current_round || 1}. turu değerlendiriyor`,
+    completed:'Agent akışı tamamlandı',
+    failed:'Agent akışı tamamlanamadı',
+  };
+  const stageLabels = {planner:'Planner',traders:'Trader’lar',reviewer:'Reviewer',final:'Final',failed:'Hata'};
+  const review = run.reviews?.at(-1);
+  const summary = run.final_result?.summary || review?.summary || run.plan?.summary || 'Agent’lar hedef üzerinde çalışmaya hazırlanıyor.';
+  const provider = review?.provider || run.plan?.provider;
+  const best = run.final_result?.best_result;
+  panel.className = `agent-run-panel ${run.status}`;
+  html('agentRunPanel', `<div class="agent-run-heading">${icon('sparkles')}<strong>${escapeHTML(labels[run.status] || 'Agent akışı çalışıyor')}</strong><span class="agent-run-stage">${escapeHTML(stageLabels[run.stage] || run.stage)}</span></div><p>${escapeHTML(run.goal)}</p><p class="agent-run-summary">${escapeHTML(run.error || summary)}</p><div class="agent-run-meta"><span>${icon('repeat')} Tur ${run.current_round || 0}/${run.max_rounds}</span><span>${icon('bot')} ${run.trader_count} trader</span>${provider ? `<span>${icon('sparkles')} ${escapeHTML(provider)}</span>` : ''}${best ? `<span>${icon('chart')} En iyi skor ${number(best.score)}</span>` : ''}</div>`);
+}
 function renderDetail() {
   const job = state.job;
   $('copyButton').disabled = !job;
@@ -234,6 +254,7 @@ function renderDetail() {
   renderActivity();
   renderInsights();
   renderChecklist();
+  renderAgentRun();
 }
 function resultRow(result,index) {
   const params = Object.entries(result.params || {}).map(([key,value]) => `${key}: ${value}`).join(' · ');
@@ -321,6 +342,24 @@ async function loadJob(jobId) {
   $('gettingStarted').hidden = true;
   await refreshDetail();
 }
+async function refreshAgentRun() {
+  if (!state.agentRunId) return;
+  try {
+    const run = await api(`/agent-runs/${encodeURIComponent(state.agentRunId)}`);
+    const previousRunJobId = state.agentRun?.current_job_id;
+    state.agentRun = run;
+    delete state.errors.agentRun;
+    if (run.current_job_id && run.current_job_id !== previousRunJobId) await loadJob(run.current_job_id);
+    renderAgentRun();
+    if (['completed','failed'].includes(run.status) && state.agentRunNotified !== run.run_id) {
+      state.agentRunNotified = run.run_id;
+      toast(run.status === 'completed' ? 'Planner, trader ve Reviewer akışı tamamlandı.' : `Agent akışı başarısız: ${run.error || 'Bilinmeyen hata'}`, run.status === 'failed');
+    }
+  } catch (error) {
+    state.errors.agentRun = error.message;
+    renderAgentRun();
+  }
+}
 async function refreshAll() {
   if (refreshBusy) return;
   refreshBusy = true;
@@ -328,7 +367,9 @@ async function refreshAll() {
     await Promise.allSettled([
       (async () => { try { state.workers = await api('/workers'); delete state.errors.workers; } catch (error) { state.errors.workers = error.message; } renderWorkers(); })(),
       (async () => { try { state.jobs = await api('/jobs?limit=20'); state.loaded = true; delete state.errors.jobs; } catch (error) { state.errors.jobs = error.message; } renderJobs(); })(),
+      (async () => { if (state.agentRunId) return; try { const runs = await api('/agent-runs?limit=1'); if (runs.length) { state.agentRun = runs[0]; state.agentRunId = runs[0].run_id; } delete state.errors.agentRun; } catch (error) { state.errors.agentRun = error.message; } })(),
     ]);
+    await refreshAgentRun();
     if (!state.jobId && state.jobs.length) await loadJob(state.jobs[0].job_id);
     else await refreshDetail();
     renderConnection();
@@ -404,6 +445,7 @@ for (const id of ['globalSearch','jobSearch']) $(id).addEventListener('input',ev
 });
 $('resultSort').addEventListener('change',renderResults);
 $('helpButton').addEventListener('click',() => openDialog('helpDialog'));
+$('newAgentRunButton').addEventListener('click',() => { $('agentRunFormError').textContent = ''; openDialog('agentRunDialog'); });
 $('insightButton').addEventListener('click',() => { $('insightCard').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',block:'center'}); $('insightCard').focus({preventScroll:true}); });
 $('refreshButton').addEventListener('click',async () => { $('refreshButton').disabled = true; await refreshAll(); $('refreshButton').disabled = false; toast(Object.keys(state.errors).length ? 'Bazı verilere ulaşılamadı. Bağlantıyı kontrol edin.' : 'Çalışma alanı güncellendi.',Object.keys(state.errors).length > 0); });
 $('copyButton').addEventListener('click',async () => { try { await navigator.clipboard.writeText(state.jobId); toast('İş kimliği kopyalandı.'); } catch { toast('Panoya erişilemiyor. İş kimliğini detaydan seçerek kopyalayabilirsiniz.',true); $('jobId').textContent = state.jobId; } });
@@ -540,6 +582,29 @@ $('newJobForm').addEventListener('submit',async event => {
     toast(`${tasks.length} görev oluşturuldu.`);
   } catch (error) { $('jobFormError').textContent = error.message; }
   finally { $('submitJobButton').disabled = false; }
+});
+$('agentRunForm').addEventListener('submit',async event => {
+  event.preventDefault();
+  if ($('startAgentRunButton').disabled) return;
+  const goal = $('agentGoal').value.trim();
+  const max_rounds = Number($('agentMaxRounds').value);
+  const max_tasks_per_round = Number($('agentMaxTasks').value);
+  const trader_count = Number($('agentTraderCount').value);
+  if (goal.length < 3) { $('agentRunFormError').textContent = 'Hedef en az 3 karakter olmalı.'; return; }
+  $('startAgentRunButton').disabled = true;
+  $('agentRunFormError').textContent = '';
+  try {
+    const run = await api('/agent-runs',{method:'POST',body:JSON.stringify({goal,max_rounds,max_tasks_per_round,trader_count})});
+    state.agentRun = run;
+    state.agentRunId = run.run_id;
+    state.agentRunNotified = null;
+    $('agentRunDialog').close();
+    setView('overview');
+    renderAgentRun();
+    toast('Planner hedefi analiz etmeye başladı.');
+    await refreshAll();
+  } catch (error) { $('agentRunFormError').textContent = error.message; }
+  finally { $('startAgentRunButton').disabled = false; }
 });
 $('scaleForm').addEventListener('submit',async event => {
   event.preventDefault();

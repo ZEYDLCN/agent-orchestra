@@ -13,10 +13,12 @@ from orchestrator.agent_profiles import parse_agent_profiles
 from orchestrator.auth import require_api_key
 from orchestrator.config import settings
 from orchestrator.coordinator import propose_refinement
-from orchestrator.llm.factory import get_llm_provider
+from orchestrator.llm.factory import build_role_provider, get_llm_provider
 from orchestrator.logging_setup import configure_logging
 from orchestrator.messaging import MessageBus
 from orchestrator.models import (
+    AgentRun,
+    AgentRunRequest,
     JobSubmitRequest,
     JobSubmitResponse,
     ScaleRequest,
@@ -28,6 +30,7 @@ from orchestrator.queue import TaskQueue
 from orchestrator.rate_limit import RateLimitMiddleware
 from orchestrator.reaper import Reaper
 from orchestrator.worker_manager import WorkerManager
+from orchestrator.workflow import AgentWorkflow, PlannerAgent, ReviewerAgent
 
 configure_logging()
 
@@ -35,6 +38,14 @@ task_queue = TaskQueue(settings.redis_url)
 message_bus = MessageBus(settings.redis_url)
 worker_manager = WorkerManager()
 reaper = Reaper(task_queue)
+control_provider = settings.control_llm_provider or settings.llm_provider
+agent_workflow = AgentWorkflow(
+    task_queue,
+    message_bus,
+    PlannerAgent(build_role_provider(control_provider, settings.control_llm_model)),
+    ReviewerAgent(build_role_provider(control_provider, settings.control_llm_model)),
+    settings.redis_url,
+)
 
 DASHBOARD_HTML_PATH = Path(__file__).resolve().parent / "static" / "dashboard.html"
 
@@ -142,6 +153,7 @@ def ready():
             profile.provider for profile in parse_agent_profiles(settings.agent_profiles_raw)
         }
         configured_providers = profile_providers | {settings.llm_provider.lower()}
+        configured_providers.add(control_provider.lower())
         if "ollama" in configured_providers:
             from orchestrator.llm.ollama_provider import is_ollama_available
 
@@ -173,6 +185,51 @@ def scale_workers(req: ScaleRequest):
 @app.get("/workers", response_model=list[WorkerInfo])
 def list_workers():
     return worker_manager.list_workers()
+
+
+@app.post(
+    "/agent-runs",
+    response_model=AgentRun,
+    dependencies=[Depends(require_api_key)],
+)
+def start_agent_run(req: AgentRunRequest):
+    """Start the complete user goal -> planner -> traders -> reviewer loop."""
+    active_workers = [worker for worker in worker_manager.list_workers() if worker.status == "running"]
+    if len(active_workers) < req.trader_count:
+        try:
+            worker_manager.scale_to(req.trader_count)
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+    return agent_workflow.start(req)
+
+
+@app.get("/agent-runs", response_model=list[AgentRun])
+def list_agent_runs(limit: int = Query(default=20, ge=1, le=100)):
+    return agent_workflow.list_recent(limit)
+
+
+@app.get("/agent-runs/{run_id}", response_model=AgentRun)
+def get_agent_run(run_id: str):
+    run = agent_workflow.get(run_id)
+    if run is None:
+        raise HTTPException(404, "agent run not found")
+    return run
+
+
+@app.get("/agent-runs/{run_id}/events")
+def agent_run_events(run_id: str):
+    if agent_workflow.get(run_id) is None:
+        raise HTTPException(404, "agent run not found")
+
+    def event_stream():
+        for event in message_bus.subscribe(run_id):
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.delete("/workers/{worker_id}", dependencies=[Depends(require_api_key)])

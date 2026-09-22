@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 import orchestrator.main as main_module
 from orchestrator.config import settings
+from orchestrator.models import AgentRun, AgentRunRequest, WorkerInfo
 
 
 @pytest.fixture
@@ -16,6 +17,9 @@ def client(monkeypatch):
     # task_queue was originally constructed with.
     main_module.task_queue.rebind_client(fakeredis.FakeStrictRedis(server=server, decode_responses=True))
     main_module.message_bus.client = fakeredis.FakeStrictRedis(server=server, decode_responses=True)
+    main_module.agent_workflow.rebind_client(
+        fakeredis.FakeStrictRedis(server=server, decode_responses=True)
+    )
     main_module.worker_manager.registry.client = fakeredis.FakeStrictRedis(
         server=server, decode_responses=True
     )
@@ -28,6 +32,34 @@ def client(monkeypatch):
 def test_health(client):
     resp = client.get("/health")
     assert resp.status_code == 200
+
+
+def test_start_agent_run_dispatches_goal(client, monkeypatch):
+    workers = [
+        WorkerInfo(worker_id=f"worker-{index}", worktree_path="workspace/test", branch="test")
+        for index in range(3)
+    ]
+    captured = {}
+
+    def start(request: AgentRunRequest):
+        captured["request"] = request
+        return AgentRun(goal=request.goal, max_rounds=request.max_rounds, trader_count=request.trader_count)
+
+    monkeypatch.setattr(main_module.worker_manager, "list_workers", lambda: workers)
+    monkeypatch.setattr(main_module.agent_workflow, "start", start)
+
+    response = client.post(
+        "/agent-runs",
+        json={"goal": "En iyi stratejiyi bul", "max_rounds": 2, "max_tasks_per_round": 4, "trader_count": 3},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["stage"] == "planner"
+    assert captured["request"].max_tasks_per_round == 4
+
+
+def test_get_unknown_agent_run_404s(client):
+    assert client.get("/agent-runs/does-not-exist").status_code == 404
 
 
 def test_ready_reports_component_checks(client, monkeypatch):
