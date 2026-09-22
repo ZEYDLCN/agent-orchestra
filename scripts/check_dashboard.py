@@ -22,12 +22,17 @@ def main(base_url: str):
     failures: list[str] = []
     details: dict[str, dict] = {}
     offline = False
+    auth_required = False
 
     def respond(route):
-        nonlocal offline
+        nonlocal offline, auth_required
         path = route.request.url.split(base_url, 1)[-1]
         method = route.request.method
         body = None
+        if (auth_required and method in ('POST', 'DELETE', 'PUT', 'PATCH')
+                and route.request.headers.get('x-api-key') != 'smoke-test-key'):
+            route.fulfill(status=401, json={"detail": "invalid or missing API key"})
+            return
         if path.startswith('/jobs') and offline:
             route.fulfill(status=503, json={"detail": "Test connection unavailable"})
             return
@@ -292,9 +297,23 @@ def main(base_url: str):
         page.locator('#apiKeyInput').fill('smoke-test-key')
         page.locator('#apiKeyDialog button[type=submit]').click()
         assert page.evaluate("localStorage.getItem('agentos-api-key')") == 'smoke-test-key'
+        auth_required = True
+        authorized_count = page.evaluate("""async () => {
+          const workers = await api('/workers/scale', {method:'POST', body:JSON.stringify({count:3})});
+          return workers.length;
+        }""")
+        assert authorized_count == 3
         page.locator('#apiKeyButton').click()
         page.locator('#clearApiKeyButton').click()
         assert page.evaluate("localStorage.getItem('agentos-api-key')") is None
+        unauthorized_message = page.evaluate("""async () => {
+          try {
+            await api('/workers/scale', {method:'POST', body:JSON.stringify({count:3})});
+            return '';
+          } catch (error) { return error.message; }
+        }""")
+        assert 'API anahtarı' in unauthorized_message
+        auth_required = False
         page.locator('#apiKeyDialog [data-close-dialog]').click()
 
         # --- P2: delete removes the job from history ---

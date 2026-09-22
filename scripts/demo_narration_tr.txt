@@ -1,0 +1,16 @@
+Dinlediğiniz anlatım yapay zekâ tarafından oluşturulmuştur.
+
+Agent Orchestra, bir işi bağımsız agent'lara dağıtan, sonuçları canlı izleyen ve en iyi çıktıyı yeni bir çalışmaya dönüştüren dayanıklı bir orkestrasyon platformu.
+
+Ana ekranda iş geçmişini, aktif worker'ları ve sistem durumunu tek bakışta görüyoruz. Worker panelini açtığımda üç ayrı sürecin kendi Git worktree'sinde çalıştığını, yeteneklerini ve son heartbeat zamanlarını izleyebiliyorum. Her strateji görevi ağ erişimi kapalı, salt okunur ve kaynakları sınırlı bir Docker sandbox içinde yürütülüyor.
+
+Şimdi üç hızlı ve üç yavaş hareketli ortalama değeri seçiyorum. Sistem dokuz kombinasyon oluşturuyor ve görevleri worker kümesine dağıtıyor. İlerleme yüzdesi, tamamlanan işler ve anlık aktivite ekrana canlı geliyor.
+
+Arka planda Redis tabanlı lease mekanizması görev kaybını önlüyor. Bir worker beklenmedik biçimde kapanırsa lider reaper süresi dolan görevi geri alıyor; başka bir worker kaldığı yerden devam ediyor. Lease token koruması, geç gelen eski bir sonucun güncel sonucu ezmesini engelliyor.
+
+Çalışma tamamlandığında sonuçlar skora göre sıralanıyor. Agent Insights kartı en iyi kombinasyonu ve model yorumunu öne çıkarıyor. Sonucu ayrıntılı inceleyebilir, CSV veya JSON olarak indirebilir ve aynı işi tek tıkla yeniden çalıştırabiliriz.
+
+Daraltılmış tarama özelliği en iyi sonuçları yeni bir deneyin girdisine çeviriyor. Böylece sistem yalnızca paralel görev çalıştırmıyor; çıktıyı bir sonraki karara bağlayan gerçek bir agent döngüsü kuruyor.
+
+API anahtarı desteği, metrikler, health ve readiness kontrolleriyle Agent Orchestra; yerel demodan güvenli ve gözlemlenebilir üretim mimarisine uzanan sağlam bir temel sunuyor.
+

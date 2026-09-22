@@ -34,6 +34,7 @@ from orchestrator.queue_scripts import (
     ACK_TASK,
     CLAIM_TASK,
     NACK_TASK,
+    RECOVER_UNCLAIMED,
     RELEASE_LEASE,
     RENEW_LEASE,
     REQUEST_CANCEL,
@@ -77,6 +78,7 @@ class TaskQueue:
         self._ack_script = self.client.register_script(ACK_TASK)
         self._nack_script = self.client.register_script(NACK_TASK)
         self._release_script = self.client.register_script(RELEASE_LEASE)
+        self._recover_unclaimed_script = self.client.register_script(RECOVER_UNCLAIMED)
         self._cancel_script = self.client.register_script(REQUEST_CANCEL)
         self._renew_script = self.client.register_script(RENEW_LEASE)
 
@@ -159,11 +161,15 @@ class TaskQueue:
         if task_id is None:
             return None
 
+        task_id = str(task_id)
         now = time.time()
         lease_token = uuid.uuid4().hex
         encoded = self._claim_script(
-            keys=[_task_key(task_id)],
-            args=[worker_id, now, settings.task_lease_seconds, lease_token, settings.task_ttl_seconds],
+            keys=[_task_key(task_id), PROCESSING_KEY],
+            args=[
+                worker_id, now, settings.task_lease_seconds, lease_token,
+                settings.task_ttl_seconds, task_id,
+            ],
         )
         if not encoded:
             # task expired/was deleted out from under us; drop the orphaned id
@@ -197,16 +203,23 @@ class TaskQueue:
             self.metrics.observe_duration(duration_ms / 1000)
         return True
 
-    def nack(self, task_id: str, error: str, lease_token: str | None = None) -> bool:
+    def nack(
+        self,
+        task_id: str,
+        error: str,
+        lease_token: str | None = None,
+        *,
+        require_expired: bool = False,
+    ) -> bool:
         """Task failed: retry if attempts remain, else dead-letter it.
-        Same stale-token guard as ack() when lease_token is given; the
-        reaper calls this without a token since it is the authority on an
-        already-expired lease."""
+        Same stale-token guard as ack() when lease_token is given. Reaper
+        calls also require the task to still be running with an expired
+        lease, checked inside the same Lua transition."""
         raw = self._nack_script(
             keys=[_task_key(task_id), PROCESSING_KEY, DEAD_KEY],
             args=[
                 task_id, error, time.time(), settings.task_ttl_seconds,
-                lease_token or "", PENDING_KEY_PREFIX,
+                lease_token or "", PENDING_KEY_PREFIX, "1" if require_expired else "0",
             ],
         )
         outcome = json.loads(raw)
@@ -229,17 +242,23 @@ class TaskQueue:
             )
         )
 
-    def release_lease(self, task_id: str) -> None:
+    def release_lease(self, task_id: str, lease_token: str) -> bool:
         """Cooperative release when a worker is shutting down gracefully:
         put the task straight back for someone else to pick up, without
         counting it as a failed attempt."""
         task = self.get_task(task_id)
         if task is None:
-            return
-        self.client.lrem(PROCESSING_KEY, 1, task_id)
-        self._release_script(
-            keys=[_task_key(task_id), _pending_key(task.required_capability)],
-            args=[task_id, time.time(), settings.task_ttl_seconds],
+            self.client.lrem(PROCESSING_KEY, 1, task_id)
+            return False
+        return bool(
+            self._release_script(
+                keys=[
+                    _task_key(task_id),
+                    _pending_key(task.required_capability),
+                    PROCESSING_KEY,
+                ],
+                args=[task_id, time.time(), settings.task_ttl_seconds, lease_token],
+            )
         )
 
     def reap_expired(self) -> list[str]:
@@ -252,10 +271,28 @@ class TaskQueue:
             if task is None:
                 self.client.lrem(PROCESSING_KEY, 1, task_id)
                 continue
-            if task.lease_expires_at is None or task.lease_expires_at > time.time():
+            if task.status == TaskStatus.PENDING and task.lease_expires_at is None:
+                recovered = self._recover_unclaimed_script(
+                    keys=[
+                        _task_key(task_id),
+                        PROCESSING_KEY,
+                        _pending_key(task.required_capability),
+                    ],
+                    args=[task_id],
+                )
+                if recovered:
+                    reclaimed.append(task_id)
                 continue
-            self.nack(task_id, error="lease expired (worker crashed or stopped responding)")
-            reclaimed.append(task_id)
+            now = time.time()
+            if task.lease_expires_at is None or task.lease_expires_at > now:
+                continue
+            if self.nack(
+                task_id,
+                error="lease expired (worker crashed or stopped responding)",
+                lease_token=task.lease_token,
+                require_expired=True,
+            ):
+                reclaimed.append(task_id)
         return reclaimed
 
     def request_cancel(self, task_id: str) -> bool:

@@ -14,12 +14,13 @@ them since. Redis runs each script as a single atomic step, so there's no
 gap for a concurrent writer to land in the middle of a read-modify-write.
 """
 
-# KEYS[1] = task key
+# KEYS[1] = task key, KEYS[2] = processing key
 # ARGV[1] = worker_id, ARGV[2] = now_ts, ARGV[3] = lease_seconds,
-# ARGV[4] = new_lease_token, ARGV[5] = ttl_seconds
+# ARGV[4] = new_lease_token, ARGV[5] = ttl_seconds, ARGV[6] = task_id
 CLAIM_TASK = """
 local raw = redis.call('GET', KEYS[1])
 if not raw then return false end
+if redis.call('LPOS', KEYS[2], ARGV[6]) == false then return false end
 local task = cjson.decode(raw)
 task['attempt_count'] = task['attempt_count'] + 1
 task['status'] = 'running'
@@ -57,7 +58,8 @@ return 1
 
 # KEYS[1] = task key, KEYS[2] = processing key, KEYS[3] = dead-letter key
 # ARGV[1] = task_id, ARGV[2] = error, ARGV[3] = now_ts, ARGV[4] = ttl_seconds,
-# ARGV[5] = expected_lease_token ('' to skip check), ARGV[6] = pending key prefix
+# ARGV[5] = expected_lease_token ('' to skip check), ARGV[6] = pending key prefix,
+# ARGV[7] = require_expired_running ('1' for a reaper reclaim)
 NACK_TASK = """
 local raw = redis.call('GET', KEYS[1])
 if not raw then
@@ -67,6 +69,13 @@ end
 local task = cjson.decode(raw)
 if ARGV[5] ~= '' and task['lease_token'] ~= ARGV[5] then
   return cjson.encode({ok=false, reason='stale'})
+end
+if ARGV[7] == '1' then
+  if task['status'] ~= 'running' or task['lease_expires_at'] == nil or
+     task['lease_expires_at'] == cjson.null or
+     tonumber(task['lease_expires_at']) > tonumber(ARGV[3]) then
+    return cjson.encode({ok=false, reason='not_expired'})
+  end
 end
 redis.call('LREM', KEYS[2], 1, ARGV[1])
 task['lease_expires_at'] = cjson.null
@@ -93,19 +102,46 @@ end
 return cjson.encode({ok=true, status=final_status})
 """
 
-# KEYS[1] = task key, KEYS[2] = pending key (this task's own capability queue)
-# ARGV[1] = task_id, ARGV[2] = now_ts, ARGV[3] = ttl_seconds
+# KEYS[1] = task key, KEYS[2] = pending key (this task's own capability queue),
+# KEYS[3] = processing key
+# ARGV[1] = task_id, ARGV[2] = now_ts, ARGV[3] = ttl_seconds,
+# ARGV[4] = expected_lease_token
 RELEASE_LEASE = """
 local raw = redis.call('GET', KEYS[1])
-if not raw then return 0 end
+if not raw then
+  redis.call('LREM', KEYS[3], 1, ARGV[1])
+  return 0
+end
 local task = cjson.decode(raw)
+if task['status'] ~= 'running' then return 0 end
+if task['lease_token'] ~= ARGV[4] then return 0 end
 task['status'] = 'pending'
 task['assigned_worker'] = cjson.null
 task['lease_expires_at'] = cjson.null
 task['lease_token'] = cjson.null
 task['updated_at'] = tonumber(ARGV[2])
 redis.call('SET', KEYS[1], cjson.encode(task), 'EX', ARGV[3])
+redis.call('LREM', KEYS[3], 1, ARGV[1])
 redis.call('RPUSH', KEYS[2], ARGV[1])
+return 1
+"""
+
+# A worker can die after BLMOVE puts an id in processing but before the
+# claim script records a lease. Recover that narrow gap atomically. CLAIM_TASK
+# checks processing membership, so exactly one of claim/recover can win.
+# KEYS[1] = task key, KEYS[2] = processing key, KEYS[3] = pending key
+# ARGV[1] = task_id
+RECOVER_UNCLAIMED = """
+local raw = redis.call('GET', KEYS[1])
+if not raw then
+  redis.call('LREM', KEYS[2], 1, ARGV[1])
+  return 0
+end
+local task = cjson.decode(raw)
+if task['status'] ~= 'pending' then return 0 end
+if task['lease_expires_at'] ~= nil and task['lease_expires_at'] ~= cjson.null then return 0 end
+redis.call('LREM', KEYS[2], 1, ARGV[1])
+redis.call('RPUSH', KEYS[3], ARGV[1])
 return 1
 """
 

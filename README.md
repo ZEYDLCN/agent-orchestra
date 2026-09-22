@@ -7,6 +7,9 @@ Demo senaryosu: bir trading stratejisinin parametre grid'ini worker'lara
 dağıtıp sonuçları karşılaştırma (clustered backtest), en iyi sonuçlara göre
 otomatik olarak daha dar bir takip taraması üretme.
 
+Sunum için hazır iki dakikalık Türkçe akış, anlatım metni ve OpenAI
+TTS üretim komutu: [`DEMO_TR.md`](DEMO_TR.md).
+
 ## Mimari
 
 ```
@@ -32,6 +35,7 @@ FastAPI orchestrator --push--> Redis (durable queue + registry) --pop--> Worker 
 - `sandbox/` — task'ların çalıştığı izole Docker image'ı (ağsız, salt-okunur, non-root, kaynak limitli)
 - `target_repo_seed/` — worker worktree'lerinin bootstrap edildiği örnek "çalışma kod tabanı"; `target_repo/` ilk çalıştırmada buradan üretilir ve git-ignore'ludur
 - `scripts/demo.py`, `scripts/listen.py`, `scripts/check_dashboard.py` — CLI demo client, canlı mesaj izleyici, dashboard UI kontrolü
+- `scripts/generate_demo_voice.py` — iki dakikalık Türkçe demo anlatımını OpenAI TTS ile MP3'e çevirir
 
 ### Görev dayanıklılığı (durable queue)
 
@@ -44,10 +48,12 @@ task'ı ya yeniden kuyruğa alır (deneme hakkı kaldıysa) ya da
 `dead-letter`'a taşıyıp `failed` işaretler (`max_attempts`, varsayılan 3,
 dolduğunda). `DELETE /workers/{id}` ile zarif durdurma cooperative
 çalışır: orchestrator Redis'e bir "dur" bayrağı koyar, worker bunu
-task'lar arasında kontrol edip elindeki task'ı **kayıp vermeden** geri
-bırakır ve çıkar — Windows'ta `Popen.terminate()` gerçek bir graceful
-hook sağlamadığı için bu bayrak tabanlı yaklaşım OS sinyaline ihtiyaç
-duymaz. Bu mekanizma canlı olarak test edildi: 2 worker'dan biri 120
+task'lar arasında kontrol eder ve yeni task almadan çıkar. O anda bir task
+çalışıyorsa grace süresi boyunca tamamlanması beklenir; süre aşılırsa
+process sonlandırılır ve lease reaper task'ı geri alır. Windows'ta
+`Popen.terminate()` gerçek bir graceful hook sağlamadığı için normal
+kapanış Redis bayrağıyla koordine edilir. Crash recovery mekanizması canlı
+olarak test edildi: 2 worker'dan biri 120
 görevlik bir iş ortasında sert şekilde öldürüldü, tek görev bile
 kaybolmadı (reaper log'u: `reaper reclaimed 1 expired task(s)`), iş
 %100 tamamlandı.

@@ -117,7 +117,7 @@ async function api(path, options = {}) {
     if (!response.ok) {
       let message = `İstek tamamlanamadı (HTTP ${response.status}).`;
       if (response.status === 401) message = 'Yetkisiz istek. Ayarlar’dan geçerli bir API anahtarı girin.';
-      try { const body = await response.json(); if (typeof body.detail === 'string') message = body.detail; } catch { /* Non-JSON server error. */ }
+      else try { const body = await response.json(); if (typeof body.detail === 'string') message = body.detail; } catch { /* Non-JSON server error. */ }
       throw new Error(message);
     }
     if (response.status === 204) return null;

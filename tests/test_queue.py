@@ -105,6 +105,55 @@ def test_reap_expired_requeues_abandoned_task(queue):
     assert repopped.attempt_count == 2
 
 
+def test_reaper_cannot_requeue_task_acked_after_expiry_observation(queue):
+    task = Task(job_id="job-1", payload=NONEMPTY_PAYLOAD)
+    queue.push_task(task)
+    claimed = queue.pop_task(["backtest"], "worker-1", timeout=1)
+
+    claimed.lease_expires_at = time.time() - 1
+    queue.save_task(claimed)
+    observed = queue.get_task(task.task_id)
+
+    assert queue.ack(task.task_id, {"score": 42}, claimed.lease_token) is True
+    assert queue.nack(
+        task.task_id,
+        "lease expired",
+        lease_token=observed.lease_token,
+        require_expired=True,
+    ) is False
+    assert queue.get_task(task.task_id).status == TaskStatus.DONE
+
+
+def test_reaper_cannot_requeue_lease_renewed_after_expiry_observation(queue):
+    task = Task(job_id="job-1", payload=NONEMPTY_PAYLOAD)
+    queue.push_task(task)
+    claimed = queue.pop_task(["backtest"], "worker-1", timeout=1)
+
+    claimed.lease_expires_at = time.time() - 1
+    queue.save_task(claimed)
+    observed = queue.get_task(task.task_id)
+    assert queue.renew_lease(task.task_id, claimed.lease_token) is True
+
+    assert queue.nack(
+        task.task_id,
+        "lease expired",
+        lease_token=observed.lease_token,
+        require_expired=True,
+    ) is False
+    assert queue.get_task(task.task_id).status == TaskStatus.RUNNING
+
+
+def test_reap_recovers_task_moved_to_processing_before_claim(queue):
+    task = Task(job_id="job-1", payload=NONEMPTY_PAYLOAD)
+    queue.push_task(task)
+    queue.client.lmove("queue:pending:backtest", "queue:processing", "LEFT", "RIGHT")
+
+    assert queue.reap_expired() == [task.task_id]
+    recovered = queue.pop_task(["backtest"], "worker-2", timeout=1)
+    assert recovered is not None
+    assert recovered.task_id == task.task_id
+
+
 def test_stale_lease_token_ack_is_rejected_after_reclaim(queue):
     """The race this whole fencing-token scheme exists for: worker A is
     slow, not dead -- its lease expires and the reaper hands the task to
@@ -173,11 +222,26 @@ def test_release_lease_requeues_without_counting_as_attempt(queue):
     claimed = queue.pop_task(["backtest"], "worker-1", timeout=1)
     assert claimed.attempt_count == 1
 
-    queue.release_lease(task.task_id)
+    queue.release_lease(task.task_id, claimed.lease_token)
 
     after = queue.get_task(task.task_id)
     assert after.status == TaskStatus.PENDING
     assert after.attempt_count == 1  # not incremented again on next pop until claimed
+
+
+def test_release_lease_rejects_stale_worker_token(queue):
+    task = Task(job_id="job-1", payload=NONEMPTY_PAYLOAD)
+    queue.push_task(task)
+    first_claim = queue.pop_task(["backtest"], "worker-1", timeout=1)
+    first_claim.lease_expires_at = time.time() - 1
+    queue.save_task(first_claim)
+    queue.reap_expired()
+    second_claim = queue.pop_task(["backtest"], "worker-2", timeout=1)
+
+    assert queue.release_lease(task.task_id, first_claim.lease_token) is False
+    current = queue.get_task(task.task_id)
+    assert current.status == TaskStatus.RUNNING
+    assert current.lease_token == second_claim.lease_token
 
 
 def test_request_cancel_pending_task_removes_it_from_queue(queue):
