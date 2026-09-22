@@ -24,7 +24,7 @@ jobs:
         run: ruff check orchestrator worker scripts tests
 
       - name: mypy
-        run: mypy orchestrator worker
+        run: mypy orchestrator worker scripts
 
       - name: pytest
         run: pytest -v --cov --cov-report=term-missing
@@ -39,3 +39,38 @@ jobs:
 
       - name: Build sandbox image
         run: docker build -t agent-orchestrator-sandbox:ci ./sandbox
+
+  integration:
+    # Everything tests/ covers with fakeredis, this covers with a real
+    # Redis and a real sandbox container, including the one failure mode
+    # that can't be faked: a worker process actually dying mid-task.
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build sandbox image
+        run: docker build -t agent-orchestrator-sandbox:latest ./sandbox
+
+      - name: Run end-to-end integration check
+        run: python scripts/integration_check.py
+        env:
+          ORCH_REDIS_URL: redis://localhost:6379/0

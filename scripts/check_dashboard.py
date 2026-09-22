@@ -16,8 +16,11 @@ def main(base_url: str):
     output = Path(__file__).resolve().parent.parent / "workspace" / "ui-check"
     output.mkdir(parents=True, exist_ok=True)
     now = time.time()
-    workers, jobs, submissions, failures = [], [], [], []
-    details = {}
+    workers: list[dict] = []
+    jobs: list[dict] = []
+    submissions: list[dict] = []
+    failures: list[str] = []
+    details: dict[str, dict] = {}
     offline = False
 
     def respond(route):
@@ -92,7 +95,7 @@ def main(base_url: str):
         # precisely, so one origin-wide route is both simpler and correct.
         page.route(f'{base_url}/**', respond)
         response = page.goto(f'{base_url}/dashboard')
-        assert response.status == 200
+        assert response is not None and response.status == 200
         expect(page.locator('#jobList')).to_contain_text('Henüz bir çalışma yok')
         expect(page.locator('#connectionText')).to_have_text('Bağlı')
         assert page.locator('.workbench').evaluate("node => getComputedStyle(node).display") == 'grid'
