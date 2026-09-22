@@ -60,10 +60,21 @@ class WorkerInfo(BaseModel):
     status: str = "running"
     last_heartbeat: float | None = None
     managed_locally: bool = False
+    agent_profile: str | None = None
+    llm_provider: str | None = None
 
 
 class ScaleRequest(BaseModel):
     count: int = Field(ge=0, le=50)
+
+
+class AgentProfile(BaseModel):
+    """One entry in a heterogeneous worker pool: a named LLM
+    configuration a worker process can be spawned with. See
+    ORCH_AGENT_PROFILES_RAW in config.py."""
+    name: str
+    provider: str
+    model: str | None = None
 
 
 class JobMeta(BaseModel):

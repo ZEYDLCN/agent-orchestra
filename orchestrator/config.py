@@ -19,14 +19,28 @@ class Settings(BaseSettings):
     # fast at startup instead of silently degrading.
     environment: str = "development"
 
-    # multi-LLM: "mock" (default, no key needed), "anthropic", or "openai"
+    # multi-LLM: "mock" (default, no key needed), "anthropic", "openai", or
+    # "ollama" (local model, e.g. Qwen -- no key, no external network call)
     llm_provider: str = "mock"
     anthropic_api_key: str | None = None
     anthropic_model: str = "claude-sonnet-5"
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "qwen2.5:3b"
     llm_timeout_seconds: float = 20.0
     llm_max_attempts: int = 2
+
+    # Heterogeneous agent pool: "name|provider|model" entries separated by
+    # ";", e.g. "qwen|ollama|qwen2.5:3b;claude|anthropic|claude-sonnet-5".
+    # When set, POST /workers/scale cycles new workers across these
+    # profiles instead of every worker sharing the single llm_provider
+    # above -- each spawned worker process gets its own ORCH_LLM_PROVIDER
+    # (and matching model var) as an environment override, so it's a real
+    # separate provider instance per worker, not a shared/simulated one.
+    # Unset (default): every worker uses the single provider above,
+    # unchanged from before this existed.
+    agent_profiles_raw: str = ""
 
     # shared memory / RAG-lite
     memory_top_k: int = 3

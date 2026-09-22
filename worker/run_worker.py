@@ -71,6 +71,8 @@ def main(worker_id: str, workdir: str):
         branch=f"agent/{worker_id}",
         capabilities=CAPABILITIES,
         managed_locally=False,
+        agent_profile=os.environ.get("ORCH_AGENT_PROFILE_NAME"),
+        llm_provider=llm.name,
     )
     registry.heartbeat(info)
 

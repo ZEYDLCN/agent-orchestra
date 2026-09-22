@@ -1,8 +1,14 @@
 # Agent Orchestration Tool
 
+Distributed multi-agent orchestration platform; heterogeneous LLM agents
+collaborate across isolated workers and machines.
+
 Merkezi bir orchestrator'ın, git worktree ile izole edilmiş ve Docker
 container'ında sandbox'lanmış worker process'lere görev dağıttığı, Redis
 üzerinden koordine olan dayanıklı bir çoklu-agent orkestrasyon altyapısı.
+Her worker kendi LLM sağlayıcısına sahip olabilir — local bir model
+(Ollama/Qwen) ile hosted bir model (Claude/GPT) aynı işte, aynı anda,
+farklı makinelerde birlikte çalışabilir (bkz. "Heterojen agent havuzu").
 Demo senaryosu: bir trading stratejisinin parametre grid'ini worker'lara
 dağıtıp sonuçları karşılaştırma (clustered backtest), en iyi sonuçlara göre
 otomatik olarak daha dar bir takip taraması üretme.
@@ -27,7 +33,8 @@ FastAPI orchestrator --push--> Redis (durable queue + registry) --pop--> Worker 
 - `orchestrator/coordinator.py` — tamamlanan bir job'ın en iyi sonuçlarından yeni, daha dar bir parametre taraması üretir
 - `orchestrator/messaging.py` — inter-agent pub/sub (worker'lar sonuçlarını yayınlar, geç bağlananlar için replay)
 - `orchestrator/memory.py` — shared memory + RAG-lite (parametre-uzayı benzerliğine göre geçmiş sonuç getirme)
-- `orchestrator/llm/` — multi-LLM soyutlaması: `mock` (varsayılan, key gerektirmez), `anthropic`, `openai`; timeout+retry sarmalayıcılı
+- `orchestrator/llm/` — multi-LLM soyutlaması: `mock` (varsayılan, key gerektirmez), `anthropic`, `openai`, `ollama` (local model); timeout+retry sarmalayıcılı
+- `orchestrator/agent_profiles.py` — heterojen worker havuzu için `isim|provider|model` profil tanımlarını parse eder
 - `orchestrator/mcp_server.py` — orchestrator'ı MCP tool'ları olarak dışarı açar
 - `orchestrator/auth.py`, `orchestrator/rate_limit.py` — opsiyonel API key + rate limit
 - `orchestrator/metrics.py` — Redis tabanlı iş metrikleri (`/metrics`, Prometheus formatı)
@@ -108,6 +115,41 @@ sarmalanır (`orchestrator/llm/resilient.py`). Backtest başarılı olup
 yalnızca LLM yorumu başarısız/timeout olursa, task yine de `done` sayılır
 (`execution_status=completed`, `analysis_status=failed`, `commentary=null`)
 — skor ile yorum farklı yaşam döngülerine sahiptir.
+
+### Heterojen agent havuzu (local LLM dahil)
+
+`ORCH_LLM_PROVIDER=ollama` — [Ollama](https://ollama.com) üzerinden local
+bir model (örn. Qwen) çalıştırır; key veya dış ağ çağrısı gerekmez
+(`ollama pull qwen2.5:3b` ile model indirilir, `orchestrator/llm/ollama_provider.py`
+düz HTTP ile Ollama'nın yerel API'sine bağlanır).
+
+Worker'lar birbirinden bağımsız process'ler olduğu için, **her worker'a
+farklı bir LLM sağlayıcısı** vermek sadece o worker'ı farklı ortam
+değişkenleriyle başlatmak kadar basit — simüle edilmiş değil, gerçek ayrı
+bir provider örneği. `ORCH_AGENT_PROFILES_RAW` ile bir "agent profili"
+havuzu tanımlanırsa (`isim|provider|model` girdileri `;` ile ayrılmış),
+`POST /workers/scale` yeni worker'ları bu profiller arasında sırayla
+dağıtır:
+
+```
+ORCH_AGENT_PROFILES_RAW=qwen|ollama|qwen2.5:3b;claude|anthropic|claude-sonnet-5
+```
+
+Bu örnekte kümeyi büyüttüğünde bir worker local Qwen ile, bir sonraki
+Claude ile çalışır — dashboard'da worker'ın profil adı ve çözümlenmiş LLM'i
+(`ollama:qwen2.5:3b`, `anthropic:claude-sonnet-5` gibi) görünür, her
+task sonucunda da hangi worker'ın hangi modelle ürettiği (`llm_provider`)
+kayıtlıdır. Ayarlanmazsa (varsayılan) tüm worker'lar tek bir
+`ORCH_LLM_PROVIDER`'ı paylaşır — bu özellik eklenmeden önceki davranışla
+birebir aynı.
+
+Canlı doğrulandı: `mockbot|mock` ve `qwen|ollama|qwen2.5:3b` profilleriyle
+2 worker açılıp aynı işe (8 görev) dağıtıldı — 8/8 görev tamamlandı, 0
+başarısız. Ollama bu makinede kurulu olmadığından qwen worker'ının
+yorumu `analysis_status=failed`/`commentary=null` ile zarif şekilde
+düştü, ama **stratejinin kendisi** (backtest skoru) normal şekilde
+üretildi ve en yüksek skoru bu worker buldu — LLM sağlayıcısı çökse
+bile işin asıl çıktısının etkilenmediğinin canlı kanıtı.
 
 ### Gözlemlenebilirlik
 

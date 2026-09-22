@@ -34,6 +34,19 @@ def _build_provider() -> LLMProvider:
 
         return OpenAIProvider(settings.openai_api_key, settings.openai_model)
 
+    if provider == "ollama":
+        from orchestrator.llm.ollama_provider import OllamaProvider, is_ollama_available
+
+        if settings.environment == "production" and not is_ollama_available(settings.ollama_base_url):
+            raise LLMConfigurationError(
+                f"ollama provider misconfigured: {settings.ollama_base_url} is not reachable"
+            )
+        # development: no reachability check at startup -- an unreachable
+        # Ollama surfaces the same way any other LLM failure does, via the
+        # ResilientLLM timeout/retry wrapper and analysis_status=failed,
+        # not a hard crash on boot
+        return OllamaProvider(settings.ollama_base_url, settings.ollama_model)
+
     return _missing_key(provider, None, unknown=True)
 
 

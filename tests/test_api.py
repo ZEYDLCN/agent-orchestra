@@ -56,6 +56,24 @@ def test_ready_503s_when_llm_misconfigured_in_production(client, monkeypatch):
     factory.reset_cache()
 
 
+def test_ready_checks_ollama_used_by_agent_profile(client, monkeypatch):
+    import orchestrator.llm.ollama_provider as ollama_module
+    from orchestrator.llm import factory
+
+    monkeypatch.setattr(settings, "sandbox_enabled", False)
+    monkeypatch.setattr(settings, "llm_provider", "mock")
+    monkeypatch.setattr(settings, "agent_profiles_raw", "qwen|ollama|qwen2.5:3b;reviewer|mock")
+    monkeypatch.setattr(ollama_module, "is_ollama_available", lambda url, timeout=3.0: False)
+    factory.reset_cache()
+
+    resp = client.get("/ready")
+
+    assert resp.status_code == 503
+    assert resp.json()["checks"]["llm"] is False
+    assert "not reachable" in resp.json()["llm_error"]
+    factory.reset_cache()
+
+
 def test_submit_and_get_job(client):
     resp = client.post("/jobs", json={"tasks": [{"params": {"fast_ma": 5, "slow_ma": 50}}]})
     assert resp.status_code == 200

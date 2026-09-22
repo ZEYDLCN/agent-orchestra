@@ -49,3 +49,46 @@ def test_caches_provider_instance(monkeypatch):
 
     assert first is second
     factory.reset_cache()
+
+
+def test_ollama_provider_selected_without_reachability_check_in_development(monkeypatch):
+    factory.reset_cache()
+    monkeypatch.setattr(settings, "environment", "development")
+    monkeypatch.setattr(settings, "llm_provider", "ollama")
+    monkeypatch.setattr(settings, "ollama_model", "qwen2.5:3b")
+    # deliberately not mocking reachability -- development must not check
+    # it at all (an unreachable ollama surfaces via the resilient wrapper
+    # at call time instead, same as any other LLM failure)
+
+    provider = factory.get_llm_provider()
+
+    assert provider.name == "ollama:qwen2.5:3b"
+    factory.reset_cache()
+
+
+def test_ollama_fails_fast_in_production_when_unreachable(monkeypatch):
+    import orchestrator.llm.ollama_provider as ollama_module
+
+    factory.reset_cache()
+    monkeypatch.setattr(settings, "environment", "production")
+    monkeypatch.setattr(settings, "llm_provider", "ollama")
+    monkeypatch.setattr(ollama_module, "is_ollama_available", lambda url, timeout=3.0: False)
+
+    with pytest.raises(LLMConfigurationError):
+        factory.get_llm_provider()
+    factory.reset_cache()
+
+
+def test_ollama_succeeds_in_production_when_reachable(monkeypatch):
+    import orchestrator.llm.ollama_provider as ollama_module
+
+    factory.reset_cache()
+    monkeypatch.setattr(settings, "environment", "production")
+    monkeypatch.setattr(settings, "llm_provider", "ollama")
+    monkeypatch.setattr(settings, "ollama_model", "qwen2.5:3b")
+    monkeypatch.setattr(ollama_module, "is_ollama_available", lambda url, timeout=3.0: True)
+
+    provider = factory.get_llm_provider()
+
+    assert provider.name == "ollama:qwen2.5:3b"
+    factory.reset_cache()

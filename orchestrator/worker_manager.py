@@ -1,3 +1,4 @@
+import os
 import socket
 import subprocess
 import sys
@@ -6,8 +7,9 @@ import time
 import uuid
 from pathlib import Path
 
+from orchestrator.agent_profiles import parse_agent_profiles, select_profiles_for_scale
 from orchestrator.config import settings
-from orchestrator.models import WorkerInfo
+from orchestrator.models import AgentProfile, WorkerInfo
 from orchestrator.worker_registry import WorkerRegistry
 from orchestrator.worktree import (
     add_worktree,
@@ -15,6 +17,13 @@ from orchestrator.worktree import (
     ensure_target_repo,
     remove_worktree,
 )
+
+# provider -> which model env var a profile's model overrides
+_PROVIDER_MODEL_ENV = {
+    "ollama": "ORCH_OLLAMA_MODEL",
+    "anthropic": "ORCH_ANTHROPIC_MODEL",
+    "openai": "ORCH_OPENAI_MODEL",
+}
 
 SCALE_LOCK_KEY = "lock:worker_scale"
 
@@ -46,12 +55,27 @@ class WorkerManager:
         check_git_available()
         ensure_target_repo(settings.target_repo_path, settings.target_repo_seed_path)
 
-    def spawn_worker(self) -> WorkerInfo:
+    def spawn_worker(self, profile: AgentProfile | None = None) -> WorkerInfo:
+        """profile, when given, makes this specific worker process a
+        different "agent" than its siblings: its own LLM provider (and
+        model), set via environment overrides on just this subprocess --
+        not a shared/simulated difference, a real separate provider
+        instance in a real separate process. Omitted (the default),
+        the worker inherits this orchestrator's own ORCH_LLM_PROVIDER
+        unchanged, exactly as before profiles existed."""
         worker_id = f"worker-{uuid.uuid4().hex[:8]}"
         branch = f"agent/{worker_id}"
         worktree_path = settings.workspace_path / worker_id
 
         add_worktree(settings.target_repo_path, worktree_path, branch)
+
+        env = os.environ.copy()
+        if profile is not None:
+            env["ORCH_LLM_PROVIDER"] = profile.provider
+            env["ORCH_AGENT_PROFILE_NAME"] = profile.name
+            model_env_var = _PROVIDER_MODEL_ENV.get(profile.provider)
+            if model_env_var and profile.model:
+                env[model_env_var] = profile.model
 
         try:
             proc = subprocess.Popen(
@@ -61,6 +85,7 @@ class WorkerManager:
                     "--workdir", str(worktree_path),
                 ],
                 cwd=str(Path(__file__).resolve().parent.parent),
+                env=env,
             )
         except OSError:
             remove_worktree(settings.target_repo_path, worktree_path, branch)
@@ -73,6 +98,7 @@ class WorkerManager:
             worktree_path=str(worktree_path),
             branch=branch,
             managed_locally=True,
+            agent_profile=profile.name if profile else None,
         )
         with self._local_lock:
             self._local[worker_id] = (info, proc)
@@ -121,12 +147,23 @@ class WorkerManager:
         got_lock = self.registry.client.set(SCALE_LOCK_KEY, lock_token, nx=True, ex=30)
         if not got_lock:
             raise RuntimeError("another scale operation is already in progress")
+        profiles = parse_agent_profiles(settings.agent_profiles_raw)
         try:
             self._reap_dead_local()
             current_workers = self.list_local_workers()
             current = len(current_workers)
-            for _ in range(max(0, count - current)):
-                self.spawn_worker()
+            new_profiles = select_profiles_for_scale(
+                profiles,
+                (worker.agent_profile for worker in current_workers),
+                max(0, count - current),
+            )
+            for i in range(max(0, count - current)):
+                # Balance configured profiles against workers that are
+                # still alive. Unset (the common case) means every worker
+                # shares this process's own ORCH_LLM_PROVIDER, unchanged
+                # from before profiles existed.
+                profile = new_profiles[i] if new_profiles else None
+                self.spawn_worker(profile)
             # scale-down candidates are decided here (while holding the
             # lock, against a consistent snapshot) but actually stopped
             # below, outside the lock -- a graceful stop can take as long

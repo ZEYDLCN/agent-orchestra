@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from prometheus_client.core import REGISTRY, CounterMetricFamily, GaugeMetricFamily, SummaryMetricFamily
 from prometheus_fastapi_instrumentator import Instrumentator
 
+from orchestrator.agent_profiles import parse_agent_profiles
 from orchestrator.auth import require_api_key
 from orchestrator.config import settings
 from orchestrator.coordinator import propose_refinement
@@ -137,6 +138,15 @@ def ready():
     llm_ok, llm_error = True, None
     try:
         get_llm_provider()
+        profile_providers = {
+            profile.provider for profile in parse_agent_profiles(settings.agent_profiles_raw)
+        }
+        configured_providers = profile_providers | {settings.llm_provider.lower()}
+        if "ollama" in configured_providers:
+            from orchestrator.llm.ollama_provider import is_ollama_available
+
+            if not is_ollama_available(settings.ollama_base_url):
+                llm_ok, llm_error = False, f"{settings.ollama_base_url} is not reachable"
     except Exception as exc:  # noqa: BLE001
         llm_ok, llm_error = False, str(exc)
 
