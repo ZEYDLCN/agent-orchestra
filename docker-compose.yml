@@ -12,6 +12,20 @@ services:
       timeout: 2s
       retries: 15
 
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["local-llm"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
   # Not verified end-to-end on Windows/Docker-Desktop in this repo's own
   # dev loop (the docker.sock bind mount below behaves differently across
   # platforms -- straightforward on native Linux, WSL2-backend-dependent
@@ -26,6 +40,7 @@ services:
       - "8000:8000"
     environment:
       ORCH_REDIS_URL: redis://redis:6379/0
+      ORCH_OLLAMA_BASE_URL: http://ollama:11434
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
@@ -34,3 +49,5 @@ services:
 
 volumes:
   redis-data:
+  ollama-data:
+    name: agent-orchestra-ollama

@@ -123,6 +123,19 @@ bir model (örn. Qwen) çalıştırır; key veya dış ağ çağrısı gerekmez
 (`ollama pull qwen2.5:3b` ile model indirilir, `orchestrator/llm/ollama_provider.py`
 düz HTTP ile Ollama'nın yerel API'sine bağlanır).
 
+Ollama ve Qwen'i host sisteme kurmadan Docker ile başlatmak için:
+
+```powershell
+docker compose --profile local-llm up -d redis ollama
+docker compose exec ollama ollama pull qwen2.5:3b
+```
+
+Model `agent-orchestra-ollama` adlı kalıcı Docker volume'ünde tutulur.
+Orchestrator host üzerinde çalışıyorsa `ORCH_OLLAMA_BASE_URL=http://localhost:11434`,
+Compose içindeki orchestrator servisi kullanılıyorsa `http://ollama:11434` olur.
+GPU bulunmayan makinelerde ilk yükleme ve üretim daha yavaştır; bu durumda
+`ORCH_LLM_TIMEOUT_SECONDS=180` uygun bir başlangıç değeridir.
+
 Worker'lar birbirinden bağımsız process'ler olduğu için, **her worker'a
 farklı bir LLM sağlayıcısı** vermek sadece o worker'ı farklı ortam
 değişkenleriyle başlatmak kadar basit — simüle edilmiş değil, gerçek ayrı
@@ -143,13 +156,10 @@ kayıtlıdır. Ayarlanmazsa (varsayılan) tüm worker'lar tek bir
 `ORCH_LLM_PROVIDER`'ı paylaşır — bu özellik eklenmeden önceki davranışla
 birebir aynı.
 
-Canlı doğrulandı: `mockbot|mock` ve `qwen|ollama|qwen2.5:3b` profilleriyle
-2 worker açılıp aynı işe (8 görev) dağıtıldı — 8/8 görev tamamlandı, 0
-başarısız. Ollama bu makinede kurulu olmadığından qwen worker'ının
-yorumu `analysis_status=failed`/`commentary=null` ile zarif şekilde
-düştü, ama **stratejinin kendisi** (backtest skoru) normal şekilde
-üretildi ve en yüksek skoru bu worker buldu — LLM sağlayıcısı çökse
-bile işin asıl çıktısının etkilenmediğinin canlı kanıtı.
+Canlı doğrulandı: Docker içindeki `qwen2.5:3b` modeli gerçek Türkçe çıktı
+üretti. Ayrıca Ollama erişilemezken Qwen worker'ının yorumunun
+`analysis_status=failed`/`commentary=null` ile kontrollü biçimde düştüğü,
+strateji sonucunun ise normal şekilde tamamlandığı test edildi.
 
 ### Gözlemlenebilirlik
 
