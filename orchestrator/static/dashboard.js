@@ -27,6 +27,11 @@ const paths = {
   x: '<path d="m6 6 12 12M6 18 18 6"/>',
   check: '<path d="m5 12 4 4L19 6"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  download: '<path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16"/>',
+  trash: '<path d="M4 7h16M9 7V4h6v3m-8 0 1 13a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2l1-13"/>',
+  key: '<circle cx="8" cy="15" r="4"/><path d="m10.5 12.5 8-8M16 6l2 2M19 3l2 2"/>',
+  bookmark: '<path d="M6 3h12v18l-6-4-6 4V3Z"/>',
+  repeat: '<path d="M17 2l4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 22l-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3"/>',
 };
 const $ = id => document.getElementById(id);
 const icon = name => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${paths[name] || paths.layers}</svg>`;
@@ -34,6 +39,7 @@ const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&
 const number = (value, digits = 2) => Number.isFinite(Number(value)) ? Number(value).toLocaleString('tr-TR', {maximumFractionDigits:digits}) : '—';
 const time = value => value ? new Date(value * 1000).toLocaleString('tr-TR', {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : '—';
 const state = {jobs:[], workers:[], job:null, jobId:null, filter:'all', search:'', view:'overview', source:null, reviewed:new Set(), errors:{}, loaded:false};
+const DAILY_TASK_BUDGET = 500;
 let refreshBusy = false;
 let detailRequest = null;
 let streamTimer = null;
@@ -53,16 +59,68 @@ function toast(message, error = false) {
   $('toast').hidden = false;
   toastTimer = setTimeout(() => { $('toast').hidden = true; }, 4500);
 }
+function getApiKey() { try { return localStorage.getItem('agentos-api-key') || ''; } catch { return ''; } }
+function setApiKey(value) { try { if (value) localStorage.setItem('agentos-api-key',value); else localStorage.removeItem('agentos-api-key'); } catch { /* key still works for this session */ } }
+
+function todayKey() { return `agentos-budget-${new Date().toISOString().slice(0,10)}`; }
+function getBudgetUsed() { try { return Number(localStorage.getItem(todayKey())) || 0; } catch { return 0; } }
+function recordBudgetUsage(taskCount) { try { localStorage.setItem(todayKey(), String(getBudgetUsed() + taskCount)); } catch { /* budget note just won't persist across reloads */ } }
+function updateBudgetNote(pendingTaskCount = 0) {
+  const used = getBudgetUsed();
+  const projected = used + pendingTaskCount;
+  const note = $('budgetNote');
+  note.textContent = `Bugün gönderilen görev: ${used}${pendingTaskCount ? ` (+${pendingTaskCount} bu çalışmada = ${projected})` : ''} / ${DAILY_TASK_BUDGET} önerilen bütçe`;
+  note.classList.toggle('over-budget', projected > DAILY_TASK_BUDGET);
+}
+
+function getTemplates() { try { return JSON.parse(localStorage.getItem('agentos-templates') || '[]'); } catch { return []; } }
+function saveTemplates(templates) { try { localStorage.setItem('agentos-templates', JSON.stringify(templates)); } catch { /* template still applied this session */ } }
+function renderTemplateOptions() {
+  const templates = getTemplates();
+  const select = $('templateSelect');
+  const current = select.value;
+  select.innerHTML = '<option value="">Şablon seç…</option>' + templates.map(t => `<option value="${escapeHTML(t.name)}">${escapeHTML(t.name)}</option>`).join('');
+  select.value = templates.some(t => t.name === current) ? current : '';
+  $('deleteTemplateButton').disabled = !select.value;
+}
+
+function downloadBlob(filename, content, mime) {
+  const blob = new Blob([content], {type:mime});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+function exportResultsJson() {
+  if (!state.job) return;
+  downloadBlob(`${state.jobId.slice(0,12)}-sonuclar.json`, JSON.stringify(sortedResults(),null,2), 'application/json');
+  toast('Sonuçlar JSON olarak indirildi.');
+}
+function exportResultsCsv() {
+  if (!state.job) return;
+  const rows = sortedResults();
+  const paramKeys = [...new Set(rows.flatMap(r => Object.keys(r.params || {})))];
+  const header = ['task_id','worker_id','score','duration_ms','llm_provider',...paramKeys,'commentary'];
+  const csvCell = value => `"${String(value ?? '').replace(/"/g,'""')}"`;
+  const lines = [header.join(',')].concat(rows.map(r => header.map(key => csvCell(paramKeys.includes(key) ? r.params?.[key] : r[key])).join(',')));
+  downloadBlob(`${state.jobId.slice(0,12)}-sonuclar.csv`, lines.join('\r\n'), 'text/csv');
+  toast('Sonuçlar CSV olarak indirildi.');
+}
+
 async function api(path, options = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.method ? 60000 : 12000);
+  const apiKey = getApiKey();
   try {
-    const response = await fetch(path, {...options, signal:controller.signal, headers:{'Content-Type':'application/json', ...options.headers}});
+    const response = await fetch(path, {...options, signal:controller.signal, headers:{'Content-Type':'application/json', ...(apiKey ? {'X-API-Key':apiKey} : {}), ...options.headers}});
     if (!response.ok) {
       let message = `İstek tamamlanamadı (HTTP ${response.status}).`;
+      if (response.status === 401) message = 'Yetkisiz istek. Ayarlar’dan geçerli bir API anahtarı girin.';
       try { const body = await response.json(); if (typeof body.detail === 'string') message = body.detail; } catch { /* Non-JSON server error. */ }
       throw new Error(message);
     }
+    if (response.status === 204) return null;
     return await response.json();
   } catch (error) {
     if (error.name === 'AbortError') throw new Error('Sunucu yanıt vermedi. Bağlantınızı kontrol edip yeniden deneyin.');
@@ -76,6 +134,12 @@ function status(job) {
   return {label:'Tamamlandı', cls:'success'};
 }
 function badge(label, cls = 'neutral') { return `<span class="badge ${cls}">${escapeHTML(label)}</span>`; }
+function heartbeatFreshness(worker) {
+  if (!worker.last_heartbeat) return 'heartbeat yok';
+  const ageSeconds = Math.max(0, Math.round(Date.now()/1000 - worker.last_heartbeat));
+  if (ageSeconds < 60) return `${ageSeconds}sn önce nabız`;
+  return `${Math.round(ageSeconds/60)}dk önce nabız`;
+}
 function activeWorkers() { return state.workers.filter(worker => worker.status === 'running'); }
 function results() { return (state.job?.tasks || []).filter(task => task.status === 'done' && task.result).map(task => ({...task.result, task_id:task.task_id})); }
 function sortedResults() {
@@ -107,7 +171,7 @@ function renderWorkers() {
   $('workerCount').textContent = state.workers.length;
   $('clusterCount').textContent = `${active.length} aktif`;
   html('workerPreview', state.workers.length ? state.workers.slice(0,3).map(worker => `<div class="worker-preview-item"><span class="worker-avatar">${icon('bot')}</span><div><strong>${escapeHTML(worker.worker_id)}</strong><small>${worker.status === 'running' ? 'Çalışıyor' : 'Durdu'} · PID ${escapeHTML(worker.pid)}</small></div><span class="dot ${worker.status === 'running' ? 'green' : 'red'}"></span></div>`).join('') + (state.workers.length > 3 ? `<p class="more-workers">+${state.workers.length - 3} worker daha</p>` : '') : `<p class="muted">${state.errors.workers ? 'Worker bilgilerine ulaşılamıyor.' : 'Henüz worker yok. İlk worker’ınızı ekleyerek kümenizi hazırlayın.'}</p>`);
-  html('workersList', state.workers.length ? state.workers.map(worker => `<div class="worker-row"><span class="worker-avatar">${icon('bot')}</span><div><strong>${escapeHTML(worker.worker_id)}</strong><p>PID ${escapeHTML(worker.pid)} · ${escapeHTML(worker.branch)}</p><p>${escapeHTML(worker.worktree_path)}</p></div>${badge(worker.status === 'running' ? 'Çalışıyor' : 'Durdu', worker.status === 'running' ? 'success' : 'danger')}<button class="text-button" data-stop-worker="${escapeHTML(worker.worker_id)}">Durdur</button></div>`).join('') : empty('Kümeniz hazır olmayı bekliyor', 'Yukarıdan worker sayısını belirleyip kümeyi büyütün.'));
+  html('workersList', state.workers.length ? state.workers.map(worker => `<div class="worker-row"><span class="worker-avatar">${icon('bot')}</span><div><strong>${escapeHTML(worker.worker_id)}</strong><p>PID ${escapeHTML(worker.pid)} · ${escapeHTML(worker.branch)}</p><p>${escapeHTML(worker.worktree_path)}</p><p class="worker-meta">${worker.current_task_id ? `Görev #${escapeHTML(worker.current_task_id.slice(0,8))}` : 'Boşta'} · ${escapeHTML(heartbeatFreshness(worker))}${worker.capabilities?.length ? ` · ${escapeHTML(worker.capabilities.join(', '))}` : ''}</p></div>${badge(worker.status === 'running' ? 'Çalışıyor' : 'Durdu', worker.status === 'running' ? 'success' : 'danger')}<button class="text-button" data-stop-worker="${escapeHTML(worker.worker_id)}">Durdur</button></div>`).join('') : empty('Kümeniz hazır olmayı bekliyor', 'Yukarıdan worker sayısını belirleyip kümeyi büyütün.'));
   $('noWorkersWarning').hidden = active.length > 0;
   renderChecklist();
 }
@@ -130,6 +194,14 @@ function renderChecklist() {
 function renderDetail() {
   const job = state.job;
   $('copyButton').disabled = !job;
+  $('exportJsonButton').disabled = !job || !job.done;
+  $('exportCsvButton').disabled = !job || !job.done;
+  $('rerunJobButton').disabled = !job;
+  $('deleteJobButton').disabled = !job;
+  $('cancelJobButton').hidden = !job || !job.pending_or_running;
+  $('cancelJobButton').disabled = !job || !job.pending_or_running;
+  $('refineJobButton').hidden = !job || !!job.pending_or_running || !job.done;
+  $('refineJobButton').disabled = !job || !!job.pending_or_running || !job.done;
   if (job) {
     const s = status(job);
     const grid = (job.tasks || []).length > 0 && job.tasks.every(task => task.payload?.params && 'fast_ma' in task.payload.params && 'slow_ma' in task.payload.params);
@@ -177,7 +249,7 @@ function renderResults() {
 function renderActivity() {
   const tasks = [...(state.job?.tasks || [])].sort((a,b) => b.updated_at - a.updated_at);
   const labels = {done:'Görev tamamlandı',failed:'Görev başarısız',running:'Görev çalışıyor',pending:'Görev sırada'};
-  html('activityList', tasks.length ? tasks.map(task => `<div class="activity-item"><span class="activity-marker ${escapeHTML(task.status)}">${icon(task.status === 'done' ? 'check' : task.status === 'failed' ? 'x' : 'clock')}</span><div><strong>${labels[task.status] || 'Görev güncellendi'}</strong><p>${escapeHTML(task.assigned_worker || 'Worker bekleniyor')} · #${escapeHTML(task.task_id.slice(0,8))}${task.result ? ` · Skor ${number(task.result.score)}` : ''}</p>${task.error ? `<p class="form-error">${escapeHTML(task.error)}</p>` : ''}<time>${escapeHTML(time(task.updated_at))}</time></div></div>`).join('') : empty('Akış henüz başlamadı', 'Bir iş seçtiğinizde görevlerin durumu burada görünecek.'));
+  html('activityList', tasks.length ? tasks.map(task => `<div class="activity-item"><span class="activity-marker ${escapeHTML(task.status)}">${icon(task.status === 'done' ? 'check' : task.status === 'failed' ? 'x' : 'clock')}</span><div><strong>${labels[task.status] || 'Görev güncellendi'}</strong><p>${escapeHTML(task.assigned_worker || 'Worker bekleniyor')} · #${escapeHTML(task.task_id.slice(0,8))}${task.result ? ` · Skor ${number(task.result.score)}` : ''}${task.attempt_count > 1 ? ` · ${task.attempt_count}. deneme` : ''}</p>${task.error ? `<p class="form-error">${escapeHTML(task.error)}</p>` : ''}<time>${escapeHTML(time(task.updated_at))}</time></div>${(task.status === 'failed' || task.status === 'cancelled') ? `<button class="text-button" data-retry-task="${escapeHTML(task.task_id)}">Yeniden dene</button>` : ''}</div>`).join('') : empty('Akış henüz başlamadı', 'Bir iş seçtiğinizde görevlerin durumu burada görünecek.'));
 }
 function renderInsights() {
   const best = bestResults()[0];
@@ -284,8 +356,8 @@ function gridParams() {
   return {fast,slow};
 }
 function updateGridSummary() {
-  try { const {fast,slow} = gridParams(); $('gridSummary').textContent = `${fast.length} × ${slow.length} parametre = ${fast.length * slow.length} görev`; $('jobFormError').textContent = ''; }
-  catch (error) { $('gridSummary').textContent = 'Parametrelerinizi kontrol edin'; $('jobFormError').textContent = error.message; }
+  try { const {fast,slow} = gridParams(); $('gridSummary').textContent = `${fast.length} × ${slow.length} parametre = ${fast.length * slow.length} görev`; $('jobFormError').textContent = ''; updateBudgetNote(fast.length * slow.length); }
+  catch (error) { $('gridSummary').textContent = 'Parametrelerinizi kontrol edin'; $('jobFormError').textContent = error.message; updateBudgetNote(0); }
 }
 function openResult(taskId) {
   const result = results().find(item => item.task_id === taskId);
@@ -301,7 +373,7 @@ document.addEventListener('click', async event => {
   const button = event.target.closest('button');
   if (!button || button.disabled) return;
   if (button.dataset.view) setView(button.dataset.view);
-  if (button.hasAttribute('data-new-job')) { $('jobFormError').textContent = ''; updateGridSummary(); openDialog('newJobDialog'); }
+  if (button.hasAttribute('data-new-job')) { $('jobFormError').textContent = ''; renderTemplateOptions(); updateGridSummary(); openDialog('newJobDialog'); }
   if (button.hasAttribute('data-open-workers')) { $('workerFormError').textContent = ''; openDialog('workersDialog'); }
   if (button.hasAttribute('data-close-dialog')) button.closest('dialog').close();
   if (button.dataset.jobId) await loadJob(button.dataset.jobId);
@@ -317,6 +389,12 @@ document.addEventListener('click', async event => {
     catch (error) { $('workerFormError').textContent = error.message; }
     finally { button.disabled = false; }
   }
+  if (button.dataset.retryTask) {
+    button.disabled = true;
+    try { await api(`/jobs/${encodeURIComponent(state.jobId)}/tasks/${encodeURIComponent(button.dataset.retryTask)}/retry`,{method:'POST'}); toast('Görev yeniden kuyruğa alındı.'); await refreshDetail(); }
+    catch (error) { toast(error.message,true); }
+    finally { button.disabled = false; }
+  }
 });
 for (const id of ['globalSearch','jobSearch']) $(id).addEventListener('input',event => {
   state.search = event.target.value;
@@ -329,6 +407,104 @@ $('helpButton').addEventListener('click',() => openDialog('helpDialog'));
 $('insightButton').addEventListener('click',() => { $('insightCard').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',block:'center'}); $('insightCard').focus({preventScroll:true}); });
 $('refreshButton').addEventListener('click',async () => { $('refreshButton').disabled = true; await refreshAll(); $('refreshButton').disabled = false; toast(Object.keys(state.errors).length ? 'Bazı verilere ulaşılamadı. Bağlantıyı kontrol edin.' : 'Çalışma alanı güncellendi.',Object.keys(state.errors).length > 0); });
 $('copyButton').addEventListener('click',async () => { try { await navigator.clipboard.writeText(state.jobId); toast('İş kimliği kopyalandı.'); } catch { toast('Panoya erişilemiyor. İş kimliğini detaydan seçerek kopyalayabilirsiniz.',true); $('jobId').textContent = state.jobId; } });
+
+$('exportJsonButton').addEventListener('click',exportResultsJson);
+$('exportCsvButton').addEventListener('click',exportResultsCsv);
+
+$('cancelJobButton').addEventListener('click',async () => {
+  if (!state.jobId) return;
+  $('cancelJobButton').disabled = true;
+  try { const res = await api(`/jobs/${encodeURIComponent(state.jobId)}/cancel`,{method:'POST'}); toast(`${res.cancelled} görev iptal edildi.`); await refreshDetail(); await refreshAll(); }
+  catch (error) { toast(error.message,true); }
+  finally { $('cancelJobButton').disabled = false; }
+});
+
+$('refineJobButton').addEventListener('click',async () => {
+  if (!state.jobId) return;
+  $('refineJobButton').disabled = true;
+  try {
+    const job = await api(`/jobs/${encodeURIComponent(state.jobId)}/refine`,{method:'POST'});
+    toast(`${job.task_ids.length} görevlik daraltılmış tarama başlatıldı.`);
+    await loadJob(job.job_id);
+    await refreshAll();
+  } catch (error) { toast(error.message,true); }
+  finally { $('refineJobButton').disabled = false; }
+});
+
+$('rerunJobButton').addEventListener('click',async () => {
+  if (!state.job) return;
+  $('rerunJobButton').disabled = true;
+  try {
+    const tasks = state.job.tasks.map(task => ({params:task.payload?.params ?? task.payload}));
+    const job = await api('/jobs',{method:'POST',body:JSON.stringify({tasks})});
+    recordBudgetUsage(tasks.length);
+    toast(`${tasks.length} görevle iş tekrar başlatıldı.`);
+    await loadJob(job.job_id);
+    await refreshAll();
+  } catch (error) { toast(error.message,true); }
+  finally { $('rerunJobButton').disabled = false; }
+});
+
+$('deleteJobButton').addEventListener('click',async () => {
+  if (!state.jobId) return;
+  if (!confirm('Bu işi ve tüm görevlerini silmek istediğinize emin misiniz? Bu işlem geri alınamaz.')) return;
+  $('deleteJobButton').disabled = true;
+  try {
+    await api(`/jobs/${encodeURIComponent(state.jobId)}`,{method:'DELETE'});
+    toast('İş silindi.');
+    closeStream();
+    state.jobId = null; state.job = null;
+    await refreshAll();
+    if (!state.jobs.length) {
+      $('jobTitle').textContent = 'Birlikte daha fazlası mümkün';
+      $('jobId').textContent = 'İlk işinizi oluşturun';
+      $('jobStatus').className = 'badge neutral';
+      $('jobStatus').textContent = 'Başlamaya hazır';
+      $('gettingStarted').hidden = false;
+    }
+  } catch (error) { toast(error.message,true); }
+  finally { $('deleteJobButton').disabled = false; }
+});
+
+$('apiKeyButton').addEventListener('click',() => {
+  $('apiKeyInput').value = '';
+  $('apiKeyFormNote').textContent = getApiKey() ? 'Bir anahtar kayıtlı. Değiştirmek için yeni değeri girip kaydedin.' : 'Kayıtlı anahtar yok. Orchestrator ORCH_API_KEY olmadan çalışıyorsa bu adım gerekmez.';
+  openDialog('apiKeyDialog');
+});
+$('apiKeyForm').addEventListener('submit',event => {
+  event.preventDefault();
+  const value = $('apiKeyInput').value.trim();
+  if (value) { setApiKey(value); toast('API anahtarı kaydedildi.'); }
+  $('apiKeyDialog').close();
+});
+$('clearApiKeyButton').addEventListener('click',() => { setApiKey(''); $('apiKeyInput').value = ''; $('apiKeyFormNote').textContent = 'Anahtar temizlendi.'; toast('API anahtarı temizlendi.'); });
+
+$('templateSelect').addEventListener('change',() => {
+  const selected = getTemplates().find(t => t.name === $('templateSelect').value);
+  $('deleteTemplateButton').disabled = !selected;
+  if (selected) { $('fastParams').value = selected.fast; $('slowParams').value = selected.slow; updateGridSummary(); }
+});
+$('saveTemplateButton').addEventListener('click',() => {
+  try {
+    gridParams();
+    const name = $('templateName').value.trim() || `Şablon ${getTemplates().length + 1}`;
+    const templates = getTemplates().filter(t => t.name !== name);
+    templates.push({name, fast:$('fastParams').value, slow:$('slowParams').value});
+    saveTemplates(templates);
+    renderTemplateOptions();
+    $('templateSelect').value = name;
+    $('deleteTemplateButton').disabled = false;
+    $('templateName').value = '';
+    toast(`"${name}" şablon olarak kaydedildi.`);
+  } catch (error) { $('jobFormError').textContent = error.message; }
+});
+$('deleteTemplateButton').addEventListener('click',() => {
+  const name = $('templateSelect').value;
+  if (!name) return;
+  saveTemplates(getTemplates().filter(t => t.name !== name));
+  renderTemplateOptions();
+  toast('Şablon silindi.');
+});
 function applyTheme(dark) {
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
   html('themeButton',icon(dark ? 'sun' : 'moon'));
@@ -353,6 +529,7 @@ $('newJobForm').addEventListener('submit',async event => {
     $('submitJobButton').disabled = true;
     const tasks = fast.flatMap(fast_ma => slow.map(slow_ma => ({params:{fast_ma,slow_ma}})));
     const job = await api('/jobs',{method:'POST',body:JSON.stringify({tasks})});
+    recordBudgetUsage(tasks.length);
     $('newJobDialog').close();
     state.search = ''; state.filter = 'all';
     $('globalSearch').value = ''; $('jobSearch').value = '';

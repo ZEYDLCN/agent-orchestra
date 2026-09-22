@@ -66,6 +66,42 @@ def main(base_url: str):
         elif path.endswith('/events'):
             route.fulfill(content_type='text/event-stream', body='data: {"type":"task_result"}\n\n')
             return
+        elif path.endswith('/cancel') and method == 'POST':
+            job_id = path.split('/')[2]
+            cancelled = 0
+            for task in details[job_id]['tasks']:
+                if task['status'] in ('pending', 'running'):
+                    task['status'] = 'cancelled'
+                    cancelled += 1
+            details[job_id]['pending_or_running'] = 0
+            for j in jobs:
+                if j['job_id'] == job_id:
+                    j['pending_or_running'] = 0
+            body = {"job_id": job_id, "cancelled": cancelled}
+        elif '/tasks/' in path and path.endswith('/retry') and method == 'POST':
+            _, _, job_id, _, task_id, _ = path.split('/')
+            for task in details[job_id]['tasks']:
+                if task['task_id'] == task_id:
+                    task['status'] = 'pending'
+                    task['error'] = None
+            body = {"task_id": task_id, "status": "pending"}
+        elif path.endswith('/refine') and method == 'POST':
+            job_id = path.split('/')[2]
+            new_job_id = f"r{len(jobs)+1:031d}"
+            source_tasks = details[job_id]['tasks'][:2]
+            new_tasks = [{"task_id": f"refine-{index:04d}", "job_id": new_job_id, "payload": task['payload'],
+                          "status": "done", "assigned_worker": task.get('assigned_worker', 'worker-00000001'),
+                          "updated_at": now, "created_at": now, "result": task.get('result')}
+                         for index, task in enumerate(source_tasks)]
+            details[new_job_id] = {"job_id": new_job_id, "total": len(new_tasks), "done": len(new_tasks),
+                                    "failed": 0, "pending_or_running": 0, "tasks": new_tasks}
+            jobs.insert(0, {key: value for key, value in details[new_job_id].items() if key != 'tasks'} | {"created_at": now})
+            body = {"job_id": new_job_id, "task_ids": [task['task_id'] for task in new_tasks]}
+        elif path.startswith('/jobs/') and method == 'DELETE':
+            job_id = path.rsplit('/', 1)[-1]
+            jobs[:] = [j for j in jobs if j['job_id'] != job_id]
+            removed = len(details.pop(job_id, {}).get('tasks', []))
+            body = {"job_id": job_id, "tasks_removed": removed}
         elif path.startswith('/jobs/'):
             body = details[path.rsplit('/', 1)[-1]]
         elif method in ('POST', 'DELETE', 'PUT', 'PATCH'):
@@ -202,6 +238,71 @@ def main(base_url: str):
         page.locator(f'[data-job-id="{job_id}"]').click()
         expect(page.locator('#jobDone')).to_have_text('7')
         expect(page.locator('#resultCount')).to_have_text('7')
+
+        # --- P2: templates (save, apply, delete) ---
+        page.locator('.page-heading [data-new-job]').click()
+        page.locator('#fastParams').fill('11, 22')
+        page.locator('#slowParams').fill('33, 44')
+        page.locator('#templateName').fill('smoke-template')
+        page.locator('#saveTemplateButton').click()
+        page.locator('#fastParams').fill('1')
+        page.locator('#templateSelect').select_option('smoke-template')
+        expect(page.locator('#fastParams')).to_have_value('11, 22')
+        page.locator('#deleteTemplateButton').click()
+        expect(page.locator('#templateSelect')).to_have_value('')
+        page.locator('#newJobDialog [data-close-dialog]').first.click()
+
+        # --- P2: export JSON/CSV ---
+        with page.expect_download() as download_info:
+            page.locator('#exportJsonButton').click()
+        assert download_info.value.suggested_filename.endswith('.json')
+        with page.expect_download() as download_info:
+            page.locator('#exportCsvButton').click()
+        assert download_info.value.suggested_filename.endswith('.csv')
+
+        # --- P2: rerun submits a fresh job with the same params ---
+        jobs_before = len(jobs)
+        page.locator('#rerunJobButton').click()
+        expect(page.locator('#jobCount')).to_have_text(str(jobs_before + 1))
+
+        # --- P2: refine submits a follow-up job ---
+        jobs_before = len(jobs)
+        page.locator('#refineJobButton').click()
+        expect(page.locator('#jobCount')).to_have_text(str(jobs_before + 1))
+
+        # --- P2: cancel hides/shows correctly and clears pending count ---
+        cancel_job_id = jobs[0]['job_id']
+        details[cancel_job_id]['tasks'][0]['status'] = 'pending'
+        details[cancel_job_id]['pending_or_running'] = 1
+        jobs[0]['pending_or_running'] = 1
+        page.locator(f'[data-job-id="{cancel_job_id}"]').click()
+        expect(page.locator('#cancelJobButton')).to_be_visible()
+        page.locator('#cancelJobButton').click()
+        expect(page.locator('#jobPending')).to_have_text('0')
+
+        # --- P2: retry re-queues a failed task ---
+        page.locator(f'[data-job-id="{job_id}"]').click()
+        page.locator('.view-tab[data-view=activity]').click()
+        expect(page.locator('[data-retry-task]')).to_have_count(1)
+        page.locator('[data-retry-task]').click()
+        expect(page.locator('[data-retry-task]')).to_have_count(0)
+
+        # --- P2: API key stored/cleared locally, never sent unless present ---
+        page.locator('#apiKeyButton').click()
+        page.locator('#apiKeyInput').fill('smoke-test-key')
+        page.locator('#apiKeyDialog button[type=submit]').click()
+        assert page.evaluate("localStorage.getItem('agentos-api-key')") == 'smoke-test-key'
+        page.locator('#apiKeyButton').click()
+        page.locator('#clearApiKeyButton').click()
+        assert page.evaluate("localStorage.getItem('agentos-api-key')") is None
+        page.locator('#apiKeyDialog [data-close-dialog]').click()
+
+        # --- P2: delete removes the job from history ---
+        page.on('dialog', lambda dialog: dialog.accept())
+        jobs_before = len(jobs)
+        page.locator('#deleteJobButton').click()
+        expect(page.locator('#jobCount')).to_have_text(str(jobs_before - 1))
+
         assert not failures, failures
         browser.close()
     print(f'Dashboard browser checks passed. Screenshots: {output}')

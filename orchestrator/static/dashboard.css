@@ -1757,6 +1757,59 @@ dialog::backdrop {
   display:none;
 }
 
+.budget-note {
+  font-size:11px;
+  color:var(--muted);
+  margin-top:10px;
+}
+
+.budget-note.over-budget {
+  color:var(--amber);
+}
+
+.template-row {
+  display:flex;
+  gap:8px;
+  align-items:center;
+}
+
+.template-row .form-input {
+  flex:1;
+}
+
+.template-save-row {
+  display:flex;
+  gap:8px;
+  align-items:center;
+  margin-top:14px;
+}
+
+.template-save-row .form-input {
+  flex:1;
+  width:auto;
+}
+
+.detail-actions {
+  display:flex;
+  gap:6px;
+  align-items:center;
+  flex-shrink:0;
+}
+
+.icon-button.danger {
+  color:var(--red);
+}
+
+.icon-button .button-tag {
+  display:none;
+}
+
+.activity-item .text-button {
+  color:var(--accent);
+  flex-shrink:0;
+  align-self:center;
+}
+
 .dialog-footer {
   display:flex;
   justify-content:flex-end;
@@ -2315,9 +2368,20 @@ dialog::backdrop {
   }
   .detail-heading {
     padding:22px 15px 19px;
+    flex-wrap:wrap;
   }
   .detail-heading h2 {
     font-size:16px;
+  }
+  .detail-actions {
+    flex-wrap:wrap;
+  }
+  .detail-actions .icon-button {
+    height:27px;
+    width:27px;
+  }
+  .detail-actions .icon-button svg {
+    width:15px;
   }
   .content-view {
     padding:0 14px 22px;
