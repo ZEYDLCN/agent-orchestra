@@ -3,7 +3,7 @@ uvicorn[standard]==0.53.0
 redis==5.2.1
 pydantic==2.13.5
 pydantic-settings==2.7.1
-requests==2.32.3
+requests==2.34.2
 mcp==2.2.0
 anthropic==1.7.0
 openai==3.16.2
