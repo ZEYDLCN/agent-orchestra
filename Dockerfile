@@ -8,7 +8,7 @@
 # for a small/self-hosted deployment, not something to do on a shared or
 # multi-tenant host without further isolation (rootless Docker, a proxy
 # that scopes what the socket allows, or a dedicated Docker-in-Docker VM).
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends git curl docker.io \
     && rm -rf /var/lib/apt/lists/*
